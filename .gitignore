@@ -1,0 +1,20 @@
+.vercel
+node_modules
+.next
+.env.local
+.env
+*.log
+
+# Local Netlify folder
+.netlify
+
+# Large dump files
+elao_prod.sql
+*.sql
+
+# Claude Code internals
+.claude/
+.claude-flow/
+.swarm/
+.mcp.json
+.DS_Store

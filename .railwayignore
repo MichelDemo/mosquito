@@ -1,0 +1,12 @@
+node_modules
+.next
+.git
+*.mp4
+*.mov
+*.avi
+*.mkv
+elao_prod.sql
+.DS_Store
+.swarm
+.claude
+.claude-flow
