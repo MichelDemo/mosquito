@@ -73,15 +73,80 @@ export default function EvalForm({ token, criteres, numeroEval, precedentes }: P
   }
 
   if (submitted) {
+    const scoreActuel = criteres.filter((c) => reponses[c.id] === true).length
+    const total = criteres.length
+    const pct = Math.round((scoreActuel / total) * 100)
+    const scorePrecedent = precedentes ? precedentes.filter((p) => p.reponse === true).length : null
+    const delta = scorePrecedent !== null ? scoreActuel - scorePrecedent : null
+
+    const catStats = CATEGORIES.map((cat) => {
+      const items = criteres.filter((c) => c.categorie === cat)
+      if (items.length === 0) return null
+      const oui = items.filter((c) => reponses[c.id] === true).length
+      const ouiPrec = precedentes
+        ? items.filter((c) => precedentes.find((p) => p.critere_id === c.id)?.reponse === true).length
+        : null
+      return { cat, oui, total: items.length, ouiPrec, delta: ouiPrec !== null ? oui - ouiPrec : null }
+    }).filter(Boolean) as { cat: string; oui: number; total: number; ouiPrec: number | null; delta: number | null }[]
+
     return (
-      <div className="bg-green-50 border border-green-200 rounded-2xl p-8 text-center">
-        <div className="text-4xl mb-3">✅</div>
-        <h2 className="text-xl font-bold text-green-800 mb-2">Évaluation enregistrée !</h2>
-        <p className="text-green-700 text-sm">
-          {prochainDate
-            ? `Vous recevrez votre prochaine évaluation le ${new Date(prochainDate).toLocaleDateString('fr-FR', { day: '2-digit', month: 'long', year: 'numeric' })}.`
-            : 'Merci pour votre auto-évaluation.'}
-        </p>
+      <div className="space-y-5">
+        {/* Score global */}
+        <div className="bg-white border border-gray-200 rounded-2xl p-6 text-center shadow-sm">
+          <div className="text-4xl mb-2">✅</div>
+          <h2 className="text-xl font-bold text-gray-900 mb-1">Évaluation enregistrée !</h2>
+          {prochainDate && (
+            <p className="text-sm text-gray-500 mb-4">
+              Prochaine évaluation le {new Date(prochainDate).toLocaleDateString('fr-FR', { day: '2-digit', month: 'long', year: 'numeric' })}
+            </p>
+          )}
+          <div className="flex items-end justify-center gap-2 mt-3">
+            <span className="text-5xl font-bold text-blue-600">{scoreActuel}</span>
+            <span className="text-2xl text-gray-400 mb-1">/ {total}</span>
+          </div>
+          <p className="text-gray-500 text-sm mt-1">{pct}% de réponses positives</p>
+
+          {delta !== null && (
+            <div className={`inline-flex items-center gap-1.5 mt-3 px-3 py-1.5 rounded-full text-sm font-semibold ${
+              delta > 0 ? 'bg-green-100 text-green-700' : delta < 0 ? 'bg-red-100 text-red-700' : 'bg-gray-100 text-gray-600'
+            }`}>
+              {delta > 0 ? `▲ +${delta} par rapport à la précédente` : delta < 0 ? `▼ ${delta} par rapport à la précédente` : '= Stable par rapport à la précédente'}
+            </div>
+          )}
+        </div>
+
+        {/* Détail par catégorie */}
+        <div className="space-y-2">
+          <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide px-1">Détail par catégorie</p>
+          {catStats.map(({ cat, oui, total: catTotal, delta: catDelta }) => {
+            const catPct = Math.round((oui / catTotal) * 100)
+            return (
+              <div key={cat} className="bg-white border border-gray-100 rounded-xl px-4 py-3">
+                <div className="flex items-center justify-between mb-1.5">
+                  <span className="text-xs font-semibold text-gray-600">{cat}</span>
+                  <div className="flex items-center gap-2">
+                    <span className="text-sm font-bold text-gray-800">{oui}/{catTotal}</span>
+                    {catDelta !== null && (
+                      <span className={`text-xs font-semibold px-1.5 py-0.5 rounded-full ${
+                        catDelta > 0 ? 'bg-green-100 text-green-700' : catDelta < 0 ? 'bg-red-100 text-red-700' : 'bg-gray-100 text-gray-500'
+                      }`}>
+                        {catDelta > 0 ? `+${catDelta}` : catDelta === 0 ? '=' : catDelta}
+                      </span>
+                    )}
+                  </div>
+                </div>
+                <div className="w-full bg-gray-100 rounded-full h-1.5">
+                  <div
+                    className={`h-1.5 rounded-full ${catPct >= 75 ? 'bg-green-500' : catPct >= 50 ? 'bg-blue-500' : 'bg-orange-400'}`}
+                    style={{ width: `${catPct}%` }}
+                  />
+                </div>
+              </div>
+            )
+          })}
+        </div>
+
+        <p className="text-center text-xs text-gray-400 pt-2">Mosquito — La piqûre de rappel qui ne s'oublie pas.</p>
       </div>
     )
   }
