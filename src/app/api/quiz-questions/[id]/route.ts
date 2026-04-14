@@ -21,7 +21,7 @@ export async function PUT(request: NextRequest, { params }: RouteParams) {
     }
 
     const body = await request.json()
-    const { question, options, bonne_reponse, explication } = body
+    const { question, options, bonne_reponse, feedback_correct, feedback_incorrect } = body
 
     if (!question || typeof question !== 'string' || question.trim().length === 0) {
       return NextResponse.json({ error: 'La question est obligatoire' }, { status: 400 })
@@ -58,7 +58,8 @@ export async function PUT(request: NextRequest, { params }: RouteParams) {
         question: question.trim(),
         options: options.map((o: string) => o.trim()),
         bonne_reponse: bonneReponseNum,
-        explication: explication?.trim() || null,
+        feedback_correct: feedback_correct?.trim() || null,
+        feedback_incorrect: feedback_incorrect?.trim() || null,
       })
       .eq('id', id)
       .select()

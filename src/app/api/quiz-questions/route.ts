@@ -14,7 +14,7 @@ export async function POST(request: NextRequest) {
     }
 
     const body = await request.json()
-    const { topic_id, question, options, bonne_reponse, explication } = body
+    const { topic_id, question, options, bonne_reponse, feedback_correct, feedback_incorrect } = body
 
     if (!topic_id) {
       return NextResponse.json({ error: 'Le topic est obligatoire' }, { status: 400 })
@@ -56,7 +56,8 @@ export async function POST(request: NextRequest) {
         question: question.trim(),
         options: options.map((o: string) => o.trim()),
         bonne_reponse: bonneReponseNum,
-        explication: explication?.trim() || null,
+        feedback_correct: feedback_correct?.trim() || null,
+        feedback_incorrect: feedback_incorrect?.trim() || null,
       })
       .select()
       .single()

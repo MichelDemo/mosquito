@@ -13,7 +13,7 @@ interface Question {
 interface ResultatQuestion {
   question_id: string
   est_correcte: boolean
-  explication: string | null
+  feedback: string | null
 }
 
 interface QuizSectionProps {
@@ -150,14 +150,14 @@ export default function QuizSection({
                     })}
                   </div>
 
-                  {resultat?.explication && (
+                  {resultat?.feedback && (
                     <div className={`mt-3 ml-7 rounded-lg px-4 py-3 text-sm leading-relaxed ${
                       isCorrect
                         ? 'bg-green-100 border-l-4 border-green-500 text-green-800'
                         : 'bg-orange-50 border-l-4 border-orange-400 text-orange-800'
                     }`}>
-                      <span className="font-semibold mr-1">{isCorrect ? '✓ À retenir :' : '💡 À retenir :'}</span>
-                      {resultat.explication}
+                      <span className="font-semibold mr-1">{isCorrect ? '✓' : '💡'}</span>
+                      {resultat.feedback}
                     </div>
                   )}
                 </div>

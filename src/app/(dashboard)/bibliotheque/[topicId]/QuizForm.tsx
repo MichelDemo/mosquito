@@ -15,7 +15,8 @@ const quizSchema = z.object({
   option_c: z.string().min(1, "L'option C est obligatoire").max(200, "L'option ne peut pas dépasser 200 caractères"),
   option_d: z.string().min(1, "L'option D est obligatoire").max(200, "L'option ne peut pas dépasser 200 caractères"),
   bonne_reponse: z.enum(['0', '1', '2', '3'], { required_error: 'Veuillez sélectionner la bonne réponse' }),
-  explication: z.string().max(1000, "L'explication ne peut pas dépasser 1000 caractères").optional(),
+  feedback_correct: z.string().max(1000).optional(),
+  feedback_incorrect: z.string().max(1000).optional(),
 })
 
 type QuizFormValues = z.infer<typeof quizSchema>
@@ -26,7 +27,8 @@ type QuizQuestionRow = {
   question: string
   options: unknown
   bonne_reponse: number
-  explication: string | null
+  feedback_correct: string | null
+  feedback_incorrect: string | null
 }
 
 interface QuizFormProps {
@@ -65,7 +67,8 @@ export default function QuizForm({ topicId, question, mode = 'create' }: QuizFor
       bonne_reponse: question?.bonne_reponse !== undefined
         ? (String(question.bonne_reponse) as '0' | '1' | '2' | '3')
         : undefined,
-      explication: question?.explication ?? '',
+      feedback_correct: question?.feedback_correct ?? '',
+      feedback_incorrect: question?.feedback_incorrect ?? '',
     },
   })
 
@@ -79,7 +82,8 @@ export default function QuizForm({ topicId, question, mode = 'create' }: QuizFor
       bonne_reponse: question?.bonne_reponse !== undefined
         ? (String(question.bonne_reponse) as '0' | '1' | '2' | '3')
         : undefined,
-      explication: question?.explication ?? '',
+      feedback_correct: question?.feedback_correct ?? '',
+      feedback_incorrect: question?.feedback_incorrect ?? '',
     })
     setIsOpen(true)
   }
@@ -100,7 +104,8 @@ export default function QuizForm({ topicId, question, mode = 'create' }: QuizFor
         question: data.question,
         options: [data.option_a, data.option_b, data.option_c, data.option_d],
         bonne_reponse: parseInt(data.bonne_reponse, 10),
-        explication: data.explication || null,
+        feedback_correct: data.feedback_correct || null,
+        feedback_incorrect: data.feedback_incorrect || null,
       }
 
       const response = await fetch(url, {
@@ -209,18 +214,30 @@ export default function QuizForm({ topicId, question, mode = 'create' }: QuizFor
                 <p className="text-xs text-gray-400">Sélectionnez le bouton radio à gauche de la bonne réponse</p>
               </div>
 
-              {/* Explication */}
+              {/* Feedback bonne réponse */}
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-1">
-                  Explication <span className="text-gray-400 font-normal">(optionnel)</span>
+                  Feedback — bonne réponse <span className="text-gray-400 font-normal">(optionnel)</span>
                 </label>
                 <textarea
-                  {...register('explication')}
+                  {...register('feedback_correct')}
                   rows={2}
-                  placeholder="Ex: La prospection est la première étape car..."
+                  placeholder="Ex: Bravo ! En effet, la prospection est la première étape car…"
                   className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-purple-500 focus:border-transparent resize-none"
                 />
-                {errors.explication && <p className="mt-1 text-xs text-red-500">{errors.explication.message}</p>}
+              </div>
+
+              {/* Feedback mauvaise réponse */}
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">
+                  Feedback — mauvaise réponse <span className="text-gray-400 font-normal">(optionnel)</span>
+                </label>
+                <textarea
+                  {...register('feedback_incorrect')}
+                  rows={2}
+                  placeholder="Ex: Pas tout à fait. La prospection précède toujours la qualification car…"
+                  className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-purple-500 focus:border-transparent resize-none"
+                />
               </div>
 
               {/* Actions */}

@@ -62,7 +62,7 @@ export async function POST(request: NextRequest) {
 
     const { data: questions } = await supabase
       .from('quiz_questions')
-      .select('id, bonne_reponse, explication')
+      .select('id, bonne_reponse, feedback_correct, feedback_incorrect')
       .eq('topic_id', message.topic_id)
 
     if (!questions || questions.length === 0) {
@@ -74,10 +74,13 @@ export async function POST(request: NextRequest) {
 
     // Construire une map des bonnes réponses
     const reponsesCorrectes = new Map(
-      questions.map((q) => [q.id, { bonne_reponse: q.bonne_reponse, explication: q.explication }])
+      questions.map((q) => [q.id, {
+        bonne_reponse: q.bonne_reponse,
+        feedback_correct: q.feedback_correct,
+        feedback_incorrect: q.feedback_incorrect,
+      }])
     )
 
-    // Évaluer chaque réponse et préparer l'insertion
     const insertions: Array<{
       envoi_id: string
       question_id: string
@@ -89,7 +92,7 @@ export async function POST(request: NextRequest) {
     const resultats: Array<{
       question_id: string
       est_correcte: boolean
-      explication: string | null
+      feedback: string | null
     }> = []
 
     let nbCorrectes = 0
@@ -113,7 +116,7 @@ export async function POST(request: NextRequest) {
       resultats.push({
         question_id: reponse.question_id,
         est_correcte: estCorrecte,
-        explication: questionData.explication,
+        feedback: estCorrecte ? questionData.feedback_correct : questionData.feedback_incorrect,
       })
     }
 

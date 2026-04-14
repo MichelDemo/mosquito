@@ -8,7 +8,7 @@ import VideoPreviewButton from '@/components/VideoPreviewButton'
 
 type TopicRow = { id: string; titre: string; description: string | null; created_at: string; updated_at: string }
 type VideoRow = { id: string; topic_id: string; titre: string; vimeo_id: string | null; storage_path: string | null; duree_secondes: number | null; ordre: number; created_at: string }
-type QuizRow = { id: string; topic_id: string; question: string; options: string[]; bonne_reponse: number; explication: string | null; created_at: string }
+type QuizRow = { id: string; topic_id: string; question: string; options: string[]; bonne_reponse: number; feedback_correct: string | null; feedback_incorrect: string | null; created_at: string }
 
 type PageProps = {
   params: { topicId: string }
@@ -186,10 +186,15 @@ export default async function TopicDetailPage({ params }: PageProps) {
                             </li>
                           ))}
                         </ul>
-                        {q.explication && (
-                          <p className="mt-2 text-xs text-gray-400 italic">
-                            Explication : {q.explication}
-                          </p>
+                        {(q.feedback_correct || q.feedback_incorrect) && (
+                          <div className="mt-2 space-y-0.5">
+                            {q.feedback_correct && (
+                              <p className="text-xs text-green-600 italic">✓ {q.feedback_correct}</p>
+                            )}
+                            {q.feedback_incorrect && (
+                              <p className="text-xs text-orange-500 italic">✗ {q.feedback_incorrect}</p>
+                            )}
+                          </div>
                         )}
                       </div>
                       <div className="flex items-center gap-1 flex-shrink-0">
