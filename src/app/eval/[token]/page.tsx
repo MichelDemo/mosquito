@@ -43,7 +43,7 @@ export default async function PageEval({ params }: PageProps) {
     supabase.from('formations').select('nom').eq('id', evaluation.formation_id).single(),
     supabase
       .from('auto_eval_criteres')
-      .select('id, affirmation, ordre')
+      .select('id, affirmation, categorie, ordre')
       .eq('actif', true)
       .order('ordre'),
   ])

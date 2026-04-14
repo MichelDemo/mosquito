@@ -18,7 +18,7 @@ export default async function AutoEvaluationPage() {
     { data: formations },
     { data: evalCompletes },
   ] = await Promise.all([
-    admin.from('auto_eval_criteres').select('id, affirmation, ordre, actif').eq('actif', true).order('ordre'),
+    admin.from('auto_eval_criteres').select('id, affirmation, categorie, ordre, actif').eq('actif', true).order('ordre'),
     supabase.from('formations').select('id, nom').eq('formateur_id', session.user.id).order('created_at', { ascending: false }),
     admin.from('auto_evaluations')
       .select('id, completee_le, formation_id, participant_id, auto_eval_reponses(critere_id, reponse)')
