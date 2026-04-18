@@ -1,5 +1,5 @@
 import { notFound, redirect } from 'next/navigation'
-import { createServerSupabaseClient } from '@/lib/supabase/server'
+import { createServerSupabaseClient, createAdminSupabaseClient } from '@/lib/supabase/server'
 import {
   Users,
   Calendar,
@@ -14,6 +14,7 @@ import EditParticipantModal from './EditParticipantModal'
 import TerminerButton from './TerminerButton'
 import ActivateButton from './ActivateButton'
 import PlanningTopicGroup from './PlanningTopicGroup'
+import AutoEvalFormation from './AutoEvalFormation'
 
 type FormationStatut = 'brouillon' | 'active' | 'terminee'
 
@@ -89,6 +90,27 @@ export default async function FormationDetailPage({
     `)
     .eq('formation_id', params.id)
     .order('numero_ordre', { ascending: true })
+
+  // Fetch auto-eval data
+  const admin = createAdminSupabaseClient()
+  const [{ count: totalCriteres }, { data: evalCompletes }] = await Promise.all([
+    admin.from('auto_eval_criteres').select('id', { count: 'exact', head: true }).eq('actif', true),
+    admin.from('auto_evaluations')
+      .select('id, completee_le, participant_id, auto_eval_reponses(critere_id, reponse)')
+      .eq('formation_id', params.id)
+      .not('completee_le', 'is', null)
+      .order('completee_le', { ascending: false }),
+  ])
+  const evalParticipantIds = Array.from(new Set((evalCompletes ?? []).map((e) => e.participant_id)))
+  const { data: evalParticipants } = evalParticipantIds.length
+    ? await admin.from('participants').select('id, prenom, nom').in('id', evalParticipantIds)
+    : { data: [] }
+  const evaluationsAvecParticipants = (evalCompletes ?? []).map((e) => ({
+    id: e.id,
+    completee_le: e.completee_le as string,
+    participant: evalParticipants?.find((p) => p.id === e.participant_id) ?? null,
+    reponses: (e.auto_eval_reponses as { critere_id: string; reponse: boolean }[]) ?? [],
+  }))
 
   // Fetch stats
   const { data: envois } = await supabase
@@ -183,6 +205,19 @@ export default async function FormationDetailPage({
                 tauxOuverture={tauxOuverture}
                 totalQuiz={totalQuiz}
                 participants={participantStats}
+              />
+            ),
+          },
+          {
+            id: 'auto-eval',
+            label: 'Auto-évaluation',
+            icon: 'ClipboardList',
+            content: (
+              <AutoEvalFormation
+                formationId={params.id}
+                evaluations={evaluationsAvecParticipants}
+                totalCriteres={totalCriteres ?? 0}
+                totalParticipants={(participants ?? []).length}
               />
             ),
           },
