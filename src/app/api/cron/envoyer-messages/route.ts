@@ -5,11 +5,26 @@ import { envoyerEmailRappel } from '@/lib/email/brevo'
 export async function GET(request: NextRequest) {
   // Vérifier le secret d'autorisation
   const authHeader = request.headers.get('authorization')
-  const expectedSecret = `Bearer ${process.env.CRON_SECRET}`
+  const cronSecret = process.env.CRON_SECRET
+  const expectedSecret = `Bearer ${cronSecret}`
 
-  if (!process.env.CRON_SECRET || authHeader !== expectedSecret) {
+  if (!cronSecret || authHeader !== expectedSecret) {
+    // Debug temporaire — à retirer après diagnostic
     return NextResponse.json(
-      { error: 'Non autorisé.' },
+      {
+        error: 'Non autorisé.',
+        debug: {
+          cronSecretDefined: !!cronSecret,
+          cronSecretLength: cronSecret?.length ?? 0,
+          authHeaderDefined: !!authHeader,
+          authHeaderLength: authHeader?.length ?? 0,
+          // Premiers et derniers caractères pour détecter les espaces
+          cronSecretStart: cronSecret ? JSON.stringify(cronSecret.slice(0, 3)) : null,
+          cronSecretEnd: cronSecret ? JSON.stringify(cronSecret.slice(-3)) : null,
+          authHeaderStart: authHeader ? JSON.stringify(authHeader.slice(0, 10)) : null,
+          authHeaderEnd: authHeader ? JSON.stringify(authHeader.slice(-3)) : null,
+        },
+      },
       { status: 401 }
     )
   }
