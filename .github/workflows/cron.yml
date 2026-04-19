@@ -10,14 +10,44 @@ jobs:
   envoyer-relances:
     runs-on: ubuntu-latest
     steps:
+      - name: Vérifier les secrets
+        run: |
+          if [ -z "${{ secrets.CRON_SECRET }}" ]; then
+            echo "❌ CRON_SECRET manquant dans les secrets GitHub"
+            exit 1
+          fi
+          if [ -z "${{ secrets.APP_URL }}" ]; then
+            echo "❌ APP_URL manquant dans les secrets GitHub"
+            exit 1
+          fi
+          echo "✅ Secrets présents"
+
       - name: Envoyer les relances planifiées
         run: |
-          curl -sf -X GET \
+          echo "→ Appel /api/cron/envoyer-messages"
+          RESPONSE=$(curl -s -w "\nHTTP_STATUS:%{http_code}" -X GET \
             -H "Authorization: Bearer ${{ secrets.CRON_SECRET }}" \
-            "${{ secrets.APP_URL }}/api/cron/envoyer-messages"
+            "${{ secrets.APP_URL }}/api/cron/envoyer-messages")
+          HTTP_STATUS=$(echo "$RESPONSE" | grep "HTTP_STATUS:" | cut -d: -f2)
+          BODY=$(echo "$RESPONSE" | grep -v "HTTP_STATUS:")
+          echo "Status: $HTTP_STATUS"
+          echo "Réponse: $BODY"
+          if [ "$HTTP_STATUS" != "200" ]; then
+            echo "❌ Erreur HTTP $HTTP_STATUS"
+            exit 1
+          fi
 
       - name: Envoyer les auto-évaluations planifiées
         run: |
-          curl -sf -X GET \
+          echo "→ Appel /api/cron/envoyer-auto-eval"
+          RESPONSE=$(curl -s -w "\nHTTP_STATUS:%{http_code}" -X GET \
             -H "Authorization: Bearer ${{ secrets.CRON_SECRET }}" \
-            "${{ secrets.APP_URL }}/api/cron/envoyer-auto-eval"
+            "${{ secrets.APP_URL }}/api/cron/envoyer-auto-eval")
+          HTTP_STATUS=$(echo "$RESPONSE" | grep "HTTP_STATUS:" | cut -d: -f2)
+          BODY=$(echo "$RESPONSE" | grep -v "HTTP_STATUS:")
+          echo "Status: $HTTP_STATUS"
+          echo "Réponse: $BODY"
+          if [ "$HTTP_STATUS" != "200" ]; then
+            echo "❌ Erreur HTTP $HTTP_STATUS"
+            exit 1
+          fi
