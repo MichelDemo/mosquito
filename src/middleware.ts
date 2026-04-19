@@ -7,7 +7,7 @@ import { NextResponse, type NextRequest } from 'next/server'
  * /v/*        : pages de visualisation de vidéo + quiz (accès par token)
  */
 const ROUTES_PUBLIQUES = ['/connexion']
-const PREFIXES_PUBLICS = ['/v/', '/desabonner/', '/eval/', '/api/video/', '/api/eval/']
+const PREFIXES_PUBLICS = ['/v/', '/desabonner/', '/eval/', '/api/video/', '/api/eval/', '/api/cron/']
 
 function estRoutePublique(pathname: string): boolean {
   if (ROUTES_PUBLIQUES.includes(pathname)) return true
