@@ -9,24 +9,7 @@ export async function GET(request: NextRequest) {
   const expectedSecret = `Bearer ${cronSecret}`
 
   if (!cronSecret || authHeader !== expectedSecret) {
-    // Debug temporaire — à retirer après diagnostic
-    return NextResponse.json(
-      {
-        error: 'Non autorisé.',
-        debug: {
-          cronSecretDefined: !!cronSecret,
-          cronSecretLength: cronSecret?.length ?? 0,
-          authHeaderDefined: !!authHeader,
-          authHeaderLength: authHeader?.length ?? 0,
-          // Premiers et derniers caractères pour détecter les espaces
-          cronSecretStart: cronSecret ? JSON.stringify(cronSecret.slice(0, 3)) : null,
-          cronSecretEnd: cronSecret ? JSON.stringify(cronSecret.slice(-3)) : null,
-          authHeaderStart: authHeader ? JSON.stringify(authHeader.slice(0, 10)) : null,
-          authHeaderEnd: authHeader ? JSON.stringify(authHeader.slice(-3)) : null,
-        },
-      },
-      { status: 401 }
-    )
+    return NextResponse.json({ error: 'Non autorisé.' }, { status: 401 })
   }
 
   const supabase = createAdminSupabaseClient()
