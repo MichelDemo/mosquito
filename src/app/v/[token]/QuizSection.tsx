@@ -151,7 +151,7 @@ export default function QuizSection({
                   </div>
 
                   {resultat?.feedback && (
-                    <div className={`mt-3 ml-7 rounded-lg px-4 py-3 text-sm leading-relaxed ${
+                    <div className={`mt-3 ml-7 rounded-lg px-4 py-3 text-base leading-relaxed ${
                       isCorrect
                         ? 'bg-green-100 border-l-4 border-green-500 text-green-800'
                         : 'bg-orange-50 border-l-4 border-orange-400 text-orange-800'
