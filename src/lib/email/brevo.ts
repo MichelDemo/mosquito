@@ -233,7 +233,7 @@ export async function envoyerEmailRappel(params: SendRappelEmailParams): Promise
               <!-- Note quiz -->
               <p style="margin:32px 0 0;font-size:14px;color:#9ca3af;line-height:1.6;text-align:center;">
                 Un quiz de compréhension vous attend sur la page vidéo.<br />
-                Testez vos connaissances en quelques minutes !
+                Testez vos connaissances en quelques secondes !
               </p>
             </td>
           </tr>
