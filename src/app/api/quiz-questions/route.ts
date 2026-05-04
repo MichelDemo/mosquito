@@ -5,8 +5,8 @@ export async function POST(request: NextRequest) {
   try {
     const supabase = createServerSupabaseClient()
 
-    const { data: { session } } = await supabase.auth.getSession()
-    if (!session) {
+    const { data: { user } } = await supabase.auth.getUser()
+    if (!user) {
       return NextResponse.json(
         { error: 'Vous devez être connecté pour effectuer cette action' },
         { status: 401 }

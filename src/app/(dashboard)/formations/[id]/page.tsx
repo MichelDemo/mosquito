@@ -51,17 +51,17 @@ export default async function FormationDetailPage({
   const supabase = createServerSupabaseClient()
 
   const {
-    data: { session },
-  } = await supabase.auth.getSession()
+    data: { user },
+  } = await supabase.auth.getUser()
 
-  if (!session) redirect('/connexion')
+  if (!user) redirect('/connexion')
 
   // Fetch formation
   const { data: formation, error } = await supabase
     .from('formations')
     .select('*')
     .eq('id', params.id)
-    .eq('formateur_id', session.user.id)
+    .eq('formateur_id', user.id)
     .single()
 
   if (error || !formation) notFound()

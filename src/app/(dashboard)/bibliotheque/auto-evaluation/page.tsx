@@ -7,8 +7,8 @@ import CriteresManager from './CriteresManager'
 
 export default async function AutoEvaluationPage() {
   const supabase = createServerSupabaseClient()
-  const { data: { session } } = await supabase.auth.getSession()
-  if (!session) redirect('/connexion')
+  const { data: { user } } = await supabase.auth.getUser()
+  if (!user) redirect('/connexion')
 
   const admin = createAdminSupabaseClient()
   const { data: criteres } = await admin

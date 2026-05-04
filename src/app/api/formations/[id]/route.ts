@@ -14,10 +14,10 @@ export async function GET(_request: NextRequest, { params }: RouteParams) {
     const supabase = createServerSupabaseClient()
 
     const {
-      data: { session },
-    } = await supabase.auth.getSession()
+      data: { user },
+    } = await supabase.auth.getUser()
 
-    if (!session) {
+    if (!user) {
       return NextResponse.json(
         { error: 'Vous devez être connecté.' },
         { status: 401 }
@@ -33,7 +33,7 @@ export async function GET(_request: NextRequest, { params }: RouteParams) {
         messages_planifies(*, topics(titre), videos(titre))
       `)
       .eq('id', params.id)
-      .eq('formateur_id', session.user.id)
+      .eq('formateur_id', user.id)
       .single()
 
     if (error || !formation) {
@@ -62,10 +62,10 @@ export async function PUT(request: NextRequest, { params }: RouteParams) {
     const supabase = createServerSupabaseClient()
 
     const {
-      data: { session },
-    } = await supabase.auth.getSession()
+      data: { user },
+    } = await supabase.auth.getUser()
 
-    if (!session) {
+    if (!user) {
       return NextResponse.json(
         { error: 'Vous devez être connecté.' },
         { status: 401 }
@@ -77,7 +77,7 @@ export async function PUT(request: NextRequest, { params }: RouteParams) {
       .from('formations')
       .select('id')
       .eq('id', params.id)
-      .eq('formateur_id', session.user.id)
+      .eq('formateur_id', user.id)
       .single()
 
     if (!existing) {
@@ -141,10 +141,10 @@ export async function DELETE(_request: NextRequest, { params }: RouteParams) {
     const supabase = createServerSupabaseClient()
 
     const {
-      data: { session },
-    } = await supabase.auth.getSession()
+      data: { user },
+    } = await supabase.auth.getUser()
 
-    if (!session) {
+    if (!user) {
       return NextResponse.json(
         { error: 'Vous devez être connecté.' },
         { status: 401 }
@@ -156,7 +156,7 @@ export async function DELETE(_request: NextRequest, { params }: RouteParams) {
       .from('formations')
       .select('id')
       .eq('id', params.id)
-      .eq('formateur_id', session.user.id)
+      .eq('formateur_id', user.id)
       .single()
 
     if (!existing) {

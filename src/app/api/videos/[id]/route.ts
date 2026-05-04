@@ -7,8 +7,8 @@ export async function PUT(request: NextRequest, { params }: RouteParams) {
   try {
     const supabase = createServerSupabaseClient()
 
-    const { data: { session } } = await supabase.auth.getSession()
-    if (!session) {
+    const { data: { user } } = await supabase.auth.getUser()
+    if (!user) {
       return NextResponse.json(
         { error: 'Vous devez être connecté pour effectuer cette action' },
         { status: 401 }
@@ -88,8 +88,8 @@ export async function DELETE(_request: NextRequest, { params }: RouteParams) {
   try {
     const supabase = createServerSupabaseClient()
 
-    const { data: { session } } = await supabase.auth.getSession()
-    if (!session) {
+    const { data: { user } } = await supabase.auth.getUser()
+    if (!user) {
       return NextResponse.json(
         { error: 'Vous devez être connecté pour effectuer cette action' },
         { status: 401 }

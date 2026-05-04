@@ -47,10 +47,10 @@ export default async function FormationsPage() {
   const supabase = createServerSupabaseClient()
 
   const {
-    data: { session },
-  } = await supabase.auth.getSession()
+    data: { user },
+  } = await supabase.auth.getUser()
 
-  if (!session) {
+  if (!user) {
     redirect('/connexion')
   }
 
@@ -65,7 +65,7 @@ export default async function FormationsPage() {
       participants(id),
       formation_topics(id)
     `)
-    .eq('formateur_id', session.user.id)
+    .eq('formateur_id', user.id)
     .order('created_at', { ascending: false })
 
   if (error) {

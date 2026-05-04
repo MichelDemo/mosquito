@@ -3,9 +3,9 @@ import { createServerSupabaseClient } from '@/lib/supabase/server'
 
 export default async function HomePage() {
   const supabase = createServerSupabaseClient()
-  const { data: { session } } = await supabase.auth.getSession()
+  const { data: { user } } = await supabase.auth.getUser()
 
-  if (session) {
+  if (user) {
     redirect('/tableau-de-bord')
   } else {
     redirect('/connexion')

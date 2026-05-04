@@ -27,10 +27,10 @@ export async function POST(request: NextRequest) {
     const supabase = createServerSupabaseClient()
 
     const {
-      data: { session },
-    } = await supabase.auth.getSession()
+      data: { user },
+    } = await supabase.auth.getUser()
 
-    if (!session) {
+    if (!user) {
       return NextResponse.json(
         { error: 'Vous devez être connecté pour créer une formation.' },
         { status: 401 }
@@ -67,7 +67,7 @@ export async function POST(request: NextRequest) {
         nom: body.nom.trim(),
         description: body.description?.trim() || null,
         date_formation: body.date_formation || null,
-        formateur_id: session.user.id,
+        formateur_id: user.id,
         statut: 'brouillon',
       })
       .select('id')

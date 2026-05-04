@@ -11,10 +11,10 @@ export async function PATCH(request: NextRequest) {
     const supabase = createServerSupabaseClient()
 
     const {
-      data: { session },
-    } = await supabase.auth.getSession()
+      data: { user },
+    } = await supabase.auth.getUser()
 
-    if (!session) {
+    if (!user) {
       return NextResponse.json(
         { error: 'Vous devez être connecté.' },
         { status: 401 }
@@ -65,7 +65,7 @@ export async function PATCH(request: NextRequest) {
 
     for (const msg of messages) {
       const formation = (msg.formations as unknown) as { formateur_id: string } | null
-      if (!formation || formation.formateur_id !== session.user.id) {
+      if (!formation || formation.formateur_id !== user.id) {
         return NextResponse.json(
           { error: 'Accès refusé à un ou plusieurs messages.' },
           { status: 403 }

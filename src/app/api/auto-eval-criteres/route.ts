@@ -17,8 +17,8 @@ export async function GET() {
 // POST — crée un critère global
 export async function POST(request: NextRequest) {
   const supabase = createServerSupabaseClient()
-  const { data: { session } } = await supabase.auth.getSession()
-  if (!session) return NextResponse.json({ error: 'Non autorisé.' }, { status: 401 })
+  const { data: { user } } = await supabase.auth.getUser()
+  if (!user) return NextResponse.json({ error: 'Non autorisé.' }, { status: 401 })
 
   const { affirmation, categorie, ordre } = await request.json()
   if (!affirmation?.trim()) return NextResponse.json({ error: 'Affirmation requise.' }, { status: 400 })
@@ -37,8 +37,8 @@ export async function POST(request: NextRequest) {
 // PATCH — modifie un critère
 export async function PATCH(request: NextRequest) {
   const supabase = createServerSupabaseClient()
-  const { data: { session } } = await supabase.auth.getSession()
-  if (!session) return NextResponse.json({ error: 'Non autorisé.' }, { status: 401 })
+  const { data: { user } } = await supabase.auth.getUser()
+  if (!user) return NextResponse.json({ error: 'Non autorisé.' }, { status: 401 })
 
   const { id, affirmation, categorie, ordre, actif } = await request.json()
   if (!id) return NextResponse.json({ error: 'id requis.' }, { status: 400 })
@@ -64,8 +64,8 @@ export async function PATCH(request: NextRequest) {
 // DELETE — supprime un critère
 export async function DELETE(request: NextRequest) {
   const supabase = createServerSupabaseClient()
-  const { data: { session } } = await supabase.auth.getSession()
-  if (!session) return NextResponse.json({ error: 'Non autorisé.' }, { status: 401 })
+  const { data: { user } } = await supabase.auth.getUser()
+  if (!user) return NextResponse.json({ error: 'Non autorisé.' }, { status: 401 })
 
   const { searchParams } = new URL(request.url)
   const id = searchParams.get('id')

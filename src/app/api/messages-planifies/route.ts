@@ -8,10 +8,10 @@ export async function POST(request: NextRequest) {
     const supabase = createServerSupabaseClient()
 
     const {
-      data: { session },
-    } = await supabase.auth.getSession()
+      data: { user },
+    } = await supabase.auth.getUser()
 
-    if (!session) {
+    if (!user) {
       return NextResponse.json(
         { error: 'Vous devez être connecté.' },
         { status: 401 }
@@ -42,7 +42,7 @@ export async function POST(request: NextRequest) {
       .from('formations')
       .select('id, statut')
       .eq('id', formation_id)
-      .eq('formateur_id', session.user.id)
+      .eq('formateur_id', user.id)
       .single()
 
     if (!formation) {

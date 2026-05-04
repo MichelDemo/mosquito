@@ -10,10 +10,10 @@ export async function DELETE(_request: NextRequest, { params }: RouteParams) {
     const supabase = createServerSupabaseClient()
 
     const {
-      data: { session },
-    } = await supabase.auth.getSession()
+      data: { user },
+    } = await supabase.auth.getUser()
 
-    if (!session) {
+    if (!user) {
       return NextResponse.json(
         { error: 'Vous devez être connecté.' },
         { status: 401 }
@@ -32,7 +32,7 @@ export async function DELETE(_request: NextRequest, { params }: RouteParams) {
     }
 
     const formation = (message as any).formations
-    if (!formation || formation.formateur_id !== session.user.id) {
+    if (!formation || formation.formateur_id !== user.id) {
       return NextResponse.json({ error: 'Accès refusé.' }, { status: 403 })
     }
 
