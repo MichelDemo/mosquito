@@ -45,8 +45,11 @@ export async function GET(
   }
 
   if (!video.storage_path) {
+    console.error('video/token: storage_path est null pour video_id', msg.video_id)
     return NextResponse.json({ error: 'Pas de fichier vidéo.' }, { status: 404 })
   }
+
+  console.log('video/token: génération URL signée pour', video.storage_path)
 
   // Générer l'URL signée — 7 jours (même durée que la validité du lien email)
   const { data: signedData, error: signedError } = await supabase.storage
@@ -54,12 +57,17 @@ export async function GET(
     .createSignedUrl(video.storage_path, 7 * 24 * 3600)
 
   if (signedError || !signedData?.signedUrl) {
-    console.error('video/token: createSignedUrl échoué', signedError)
+    console.error('video/token: createSignedUrl échoué', {
+      storage_path: video.storage_path,
+      error: signedError,
+    })
     return NextResponse.json(
       { error: 'Impossible de générer le lien vidéo.', detail: signedError?.message },
       { status: 500 }
     )
   }
+
+  console.log('video/token: redirection vers URL signée OK')
 
   // Redirection sans cache — URL fraîche à chaque accès
   return NextResponse.redirect(signedData.signedUrl, {
