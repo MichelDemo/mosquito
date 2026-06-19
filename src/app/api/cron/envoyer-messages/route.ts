@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createAdminSupabaseClient } from '@/lib/supabase/server'
-import { envoyerEmailRappel } from '@/lib/email/brevo'
+import { envoyerEmailRappel, envoyerWhatsAppRappel } from '@/lib/email/brevo'
 
 export async function GET(request: NextRequest) {
   // Vérifier le secret d'autorisation
@@ -88,6 +88,8 @@ export async function GET(request: NextRequest) {
       if (!doitEnvoyer) continue
 
       // Récupérer les envois en attente pour ce message
+      // Exclure les destinataires désabonnés (sinon le lien « Ne plus recevoir »
+      // des emails est sans effet sur les relances automatiques).
       const { data: envois, error: envoisError } = await supabase
         .from('envois_participants')
         .select(`
@@ -96,11 +98,15 @@ export async function GET(request: NextRequest) {
           participants (
             prenom,
             nom,
-            email
+            email,
+            telephone,
+            canal_email,
+            canal_whatsapp
           )
         `)
         .eq('message_id', message.id)
         .eq('statut', 'en_attente')
+        .neq('desabonne', true)
 
       if (envoisError) {
         console.error(`Erreur récupération envois pour message ${message.id}:`, envoisError)
@@ -125,6 +131,9 @@ export async function GET(request: NextRequest) {
           prenom: string
           nom: string
           email: string
+          telephone: string | null
+          canal_email: boolean
+          canal_whatsapp: boolean
         } | null
 
         if (!participant) {
@@ -134,20 +143,51 @@ export async function GET(request: NextRequest) {
           continue
         }
 
-        try {
-          await envoyerEmailRappel({
-            destinataire: {
-              prenom: participant.prenom,
-              nom: participant.nom,
-              email: participant.email,
-            },
-            formation: { nom: formation.nom },
-            topic: { titre: topic.titre },
-            video: { titre: video.titre },
-            token: envoi.token,
-            dateEnvoi: today,
-          })
+        let envoiOk = false
 
+        // Envoi email — sauf si le participant a désactivé le canal email
+        if (participant.canal_email !== false) {
+          try {
+            await envoyerEmailRappel({
+              destinataire: {
+                prenom: participant.prenom,
+                nom: participant.nom,
+                email: participant.email,
+              },
+              formation: { nom: formation.nom },
+              topic: { titre: topic.titre },
+              video: { titre: video.titre },
+              token: envoi.token,
+              dateEnvoi: today,
+            })
+            envoiOk = true
+          } catch (emailErr) {
+            console.error(`Erreur envoi email pour envoi ${envoi.id}:`, emailErr)
+          }
+        }
+
+        // Envoi WhatsApp (indépendant — n'empêche pas l'email)
+        if (participant.canal_whatsapp && participant.telephone &&
+            process.env.BREVO_WHATSAPP_SENDER && process.env.BREVO_WHATSAPP_TEMPLATE_ID) {
+          try {
+            await envoyerWhatsAppRappel({
+              destinataire: {
+                prenom: participant.prenom,
+                nom: participant.nom,
+                telephone: participant.telephone,
+              },
+              formation: { nom: formation.nom },
+              topic: { titre: topic.titre },
+              video: { titre: video.titre },
+              token: envoi.token,
+            })
+            envoiOk = true
+          } catch (waErr) {
+            console.error(`Erreur envoi WhatsApp pour envoi ${envoi.id}:`, waErr)
+          }
+        }
+
+        if (envoiOk) {
           await supabase
             .from('envois_participants')
             .update({
@@ -155,10 +195,8 @@ export async function GET(request: NextRequest) {
               envoye_le: new Date().toISOString(),
             })
             .eq('id', envoi.id)
-
           traites++
-        } catch (emailErr) {
-          console.error(`Erreur envoi email pour envoi ${envoi.id}:`, emailErr)
+        } else {
           await supabase
             .from('envois_participants')
             .update({ statut: 'erreur' })
