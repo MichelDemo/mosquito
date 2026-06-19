@@ -2,6 +2,7 @@ import { notFound } from 'next/navigation'
 import { createAdminSupabaseClient } from '@/lib/supabase/server'
 import QuizSection from './QuizSection'
 import VideoPlayer from '@/components/VideoPlayer'
+import ReminderPreferences from '@/components/ReminderPreferences'
 
 interface PageProps {
   params: { token: string }
@@ -168,6 +169,11 @@ export default async function PageVideo({ params }: PageProps) {
               />
             </div>
           )}
+        </div>
+
+        {/* Gérer mes rappels : décaler ou se désabonner */}
+        <div className="mt-6">
+          <ReminderPreferences token={token} />
         </div>
 
         {/* Pied de page */}
