@@ -72,6 +72,8 @@ export interface Database {
           nom: string
           email: string
           telephone: string | null
+          canal_email: boolean
+          canal_whatsapp: boolean
           created_at: string
         }
         Insert: Omit<Database['public']['Tables']['participants']['Row'], 'id' | 'created_at'>
@@ -103,6 +105,8 @@ export interface Database {
           ouvert_le: string | null
           quiz_complete: boolean
           statut: 'en_attente' | 'envoye' | 'erreur'
+          desabonne: boolean
+          reporter_a: string | null
           created_at: string
         }
         Insert: Omit<Database['public']['Tables']['envois_participants']['Row'], 'id' | 'created_at'>

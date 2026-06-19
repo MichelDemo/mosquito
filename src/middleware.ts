@@ -6,8 +6,8 @@ import { NextResponse, type NextRequest } from 'next/server'
  * /connexion  : page de connexion
  * /v/*        : pages de visualisation de vidéo + quiz (accès par token)
  */
-const ROUTES_PUBLIQUES = ['/connexion']
-const PREFIXES_PUBLICS = ['/v/', '/desabonner/', '/eval/', '/api/video/', '/api/eval/', '/api/cron/', '/api/quiz/']
+const ROUTES_PUBLIQUES = ['/connexion', '/api/desabonner', '/api/reporter']
+const PREFIXES_PUBLICS = ['/v/', '/desabonner/', '/preferences/', '/eval/', '/api/video/', '/api/eval/', '/api/cron/', '/api/quiz/']
 
 function estRoutePublique(pathname: string): boolean {
   if (ROUTES_PUBLIQUES.includes(pathname)) return true

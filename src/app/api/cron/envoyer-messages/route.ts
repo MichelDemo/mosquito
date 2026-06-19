@@ -95,6 +95,7 @@ export async function GET(request: NextRequest) {
         .select(`
           id,
           token,
+          reporter_a,
           participants (
             prenom,
             nom,
@@ -123,9 +124,16 @@ export async function GET(request: NextRequest) {
         continue
       }
 
+      // Séparer les envois dûs des envois reportés par le destinataire.
+      // Un envoi reporté reste « en_attente » jusqu'à sa nouvelle date.
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const estReporte = (e: any) => e.reporter_a && new Date(e.reporter_a) > today
+      const envoisDus = envois.filter((e) => !estReporte(e))
+      const envoisReportes = envois.filter((e) => estReporte(e))
+
       let messageErreur = false
 
-      for (const envoi of envois) {
+      for (const envoi of envoisDus) {
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
         const participant = envoi.participants as any as {
           prenom: string
@@ -206,10 +214,15 @@ export async function GET(request: NextRequest) {
         }
       }
 
-      // Mettre à jour le statut du message
+      // Mettre à jour le statut du message.
+      // Tant que des envois sont reportés, le message reste « en_attente »
+      // pour être repris lors d'un prochain passage du cron.
+      const resterEnAttente = envoisReportes.length > 0
       await supabase
         .from('messages_planifies')
-        .update({ statut: messageErreur ? 'erreur' : 'envoye' })
+        .update({
+          statut: resterEnAttente ? 'en_attente' : messageErreur ? 'erreur' : 'envoye',
+        })
         .eq('id', message.id)
     }
 

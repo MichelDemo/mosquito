@@ -243,8 +243,12 @@ export async function envoyerEmailRappel(params: SendRappelEmailParams): Promise
             <td style="background-color:#f9fafb;border-top:1px solid #f3f4f6;padding:24px 40px;text-align:center;">
               <p style="margin:0;font-size:12px;color:#9ca3af;line-height:1.6;">
                 Ce message vous a été envoyé dans le cadre de votre formation.<br />
-                <a href="${appUrl}/desabonner/${token}" style="color:#9ca3af;text-decoration:underline;">
-                  Ne plus recevoir les prochaines piqûres de rappel
+                <a href="${appUrl}/preferences/${token}" style="color:#6b7280;text-decoration:underline;">
+                  Décaler mon prochain rappel
+                </a>
+                &nbsp;·&nbsp;
+                <a href="${appUrl}/preferences/${token}" style="color:#9ca3af;text-decoration:underline;">
+                  Me désabonner de ce sujet
                 </a>
               </p>
             </td>
