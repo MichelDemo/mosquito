@@ -7,6 +7,7 @@ const DELAIS = {
   '1w': (d: Date) => addWeeks(d, 1),
   '2w': (d: Date) => addWeeks(d, 2),
   '1m': (d: Date) => addMonths(d, 1),
+  '2m': (d: Date) => addMonths(d, 2),
 } as const
 
 type DelaiKey = keyof typeof DELAIS

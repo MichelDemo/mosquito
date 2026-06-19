@@ -2,12 +2,13 @@
 
 import { useState } from 'react'
 
-type Delai = '1w' | '2w' | '1m'
+type Delai = '1w' | '2w' | '1m' | '2m'
 
 const OPTIONS_DELAI: { cle: Delai; libelle: string }[] = [
   { cle: '1w', libelle: 'Dans 1 semaine' },
   { cle: '2w', libelle: 'Dans 2 semaines' },
   { cle: '1m', libelle: 'Dans 1 mois' },
+  { cle: '2m', libelle: 'Dans 2 mois' },
 ]
 
 /**
@@ -92,7 +93,7 @@ export default function ReminderPreferences({ token }: { token: string }) {
         <p className="text-xs text-gray-400 mb-3">
           Vous recevrez le prochain rappel plus tard, sans rien perdre.
         </p>
-        <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
+        <div className="grid grid-cols-2 gap-2">
           {OPTIONS_DELAI.map(({ cle, libelle }) => (
             <button
               key={cle}
