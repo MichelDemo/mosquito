@@ -1,6 +1,12 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createAdminSupabaseClient } from '@/lib/supabase/server'
 
+// Ne jamais mettre en cache : chaque requête doit régénérer une URL signée fraîche.
+// Sans ceci, Next.js met en cache la réponse 302 (Full Route Cache) avec une URL
+// signée qui finit par expirer → Supabase renvoie 400 → "Impossible de charger la vidéo".
+export const dynamic = 'force-dynamic'
+export const revalidate = 0
+
 export async function GET(
   _request: NextRequest,
   { params }: { params: { token: string } }
