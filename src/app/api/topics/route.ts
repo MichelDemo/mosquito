@@ -1,26 +1,18 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { createServerSupabaseClient } from '@/lib/supabase/server'
+import { db } from '@/db'
+import { topics } from '@/db/schema'
+import { topicsAvecNombreDeVideos } from '@/db/queries'
+import { getUser } from '@/lib/auth/session'
+
+// Lit la base à chaque appel : jamais de mise en cache statique de la réponse.
+export const dynamic = 'force-dynamic'
 
 export async function GET() {
   try {
-    const supabase = createServerSupabaseClient()
-
-    const { data: topics, error } = await supabase
-      .from('topics')
-      .select('*, videos(count)')
-      .order('created_at', { ascending: false })
-
-    if (error) {
-      return NextResponse.json(
-        { error: 'Erreur lors de la récupération des topics' },
-        { status: 500 }
-      )
-    }
-
-    return NextResponse.json({ data: topics })
+    return NextResponse.json({ data: await topicsAvecNombreDeVideos() })
   } catch {
     return NextResponse.json(
-      { error: 'Une erreur interne est survenue' },
+      { error: 'Erreur lors de la récupération des topics' },
       { status: 500 }
     )
   }
@@ -28,9 +20,7 @@ export async function GET() {
 
 export async function POST(request: NextRequest) {
   try {
-    const supabase = createServerSupabaseClient()
-
-    const { data: { user } } = await supabase.auth.getUser()
+    const user = await getUser()
     if (!user) {
       return NextResponse.json(
         { error: 'Vous devez être connecté pour effectuer cette action' },
@@ -55,16 +45,16 @@ export async function POST(request: NextRequest) {
       )
     }
 
-    const { data: topic, error } = await supabase
-      .from('topics')
-      .insert({
-        titre: titre.trim(),
-        description: description?.trim() || null,
-      })
-      .select()
-      .single()
-
-    if (error) {
+    let topic
+    try {
+      ;[topic] = await db
+        .insert(topics)
+        .values({
+          titre: titre.trim(),
+          description: description?.trim() || null,
+        })
+        .returning()
+    } catch {
       return NextResponse.json(
         { error: 'Erreur lors de la création du topic' },
         { status: 500 }

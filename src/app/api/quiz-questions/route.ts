@@ -1,11 +1,11 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { createServerSupabaseClient } from '@/lib/supabase/server'
+import { db } from '@/db'
+import { quiz_questions } from '@/db/schema'
+import { getUser } from '@/lib/auth/session'
 
 export async function POST(request: NextRequest) {
   try {
-    const supabase = createServerSupabaseClient()
-
-    const { data: { user } } = await supabase.auth.getUser()
+    const user = await getUser()
     if (!user) {
       return NextResponse.json(
         { error: 'Vous devez être connecté pour effectuer cette action' },
@@ -49,20 +49,20 @@ export async function POST(request: NextRequest) {
       )
     }
 
-    const { data: quizQuestion, error } = await supabase
-      .from('quiz_questions')
-      .insert({
-        topic_id,
-        question: question.trim(),
-        options: options.map((o: string) => o.trim()),
-        bonne_reponse: bonneReponseNum,
-        feedback_correct: feedback_correct?.trim() || null,
-        feedback_incorrect: feedback_incorrect?.trim() || null,
-      })
-      .select()
-      .single()
-
-    if (error) {
+    let quizQuestion
+    try {
+      ;[quizQuestion] = await db
+        .insert(quiz_questions)
+        .values({
+          topic_id,
+          question: question.trim(),
+          options: options.map((o: string) => o.trim()),
+          bonne_reponse: bonneReponseNum,
+          feedback_correct: feedback_correct?.trim() || null,
+          feedback_incorrect: feedback_incorrect?.trim() || null,
+        })
+        .returning()
+    } catch {
       return NextResponse.json(
         { error: 'Erreur lors de la création de la question' },
         { status: 500 }

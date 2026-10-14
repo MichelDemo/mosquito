@@ -1,9 +1,13 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { createAdminSupabaseClient } from '@/lib/supabase/server'
+import { eq } from 'drizzle-orm'
+import { db } from '@/db'
+import { envois_participants, messages_planifies, videos } from '@/db/schema'
+import { signedVideoUrl } from '@/lib/storage'
+import { isUuid } from '@/lib/uuid'
 
 // Ne jamais mettre en cache : chaque requête doit régénérer une URL signée fraîche.
 // Sans ceci, Next.js met en cache la réponse 302 (Full Route Cache) avec une URL
-// signée qui finit par expirer → Supabase renvoie 400 → "Impossible de charger la vidéo".
+// signée qui finit par expirer → le stockage renvoie une erreur → "Impossible de charger la vidéo".
 export const dynamic = 'force-dynamic'
 export const revalidate = 0
 
@@ -12,71 +16,39 @@ export async function GET(
   { params }: { params: { token: string } }
 ) {
   const { token } = params
-  const supabase = createAdminSupabaseClient()
 
-  // Récupérer l'envoi
-  const { data: envoi, error: envoiError } = await supabase
-    .from('envois_participants')
-    .select('message_id, statut, desabonne')
-    .eq('token', token)
-    .single()
+  // Envoi → message → vidéo
+  const [row] = isUuid(token)
+    ? await db
+        .select({ video_id: messages_planifies.video_id, storage_path: videos.storage_path })
+        .from(envois_participants)
+        .innerJoin(messages_planifies, eq(messages_planifies.id, envois_participants.message_id))
+        .leftJoin(videos, eq(videos.id, messages_planifies.video_id))
+        .where(eq(envois_participants.token, token))
+        .limit(1)
+    : []
 
-  if (envoiError || !envoi) {
-    console.error('video/token: envoi introuvable', envoiError)
+  if (!row) {
+    console.error('video/token: envoi introuvable')
     return NextResponse.json({ error: 'Lien invalide.' }, { status: 404 })
   }
 
-  // Récupérer le message → video_id
-  const { data: msg, error: msgError } = await supabase
-    .from('messages_planifies')
-    .select('video_id')
-    .eq('id', envoi.message_id)
-    .single()
-
-  if (msgError || !msg) {
-    console.error('video/token: message introuvable', msgError)
-    return NextResponse.json({ error: 'Vidéo introuvable.' }, { status: 404 })
-  }
-
-  // Récupérer le storage_path
-  const { data: video, error: videoError } = await supabase
-    .from('videos')
-    .select('storage_path, vimeo_id')
-    .eq('id', msg.video_id)
-    .single()
-
-  if (videoError || !video) {
-    console.error('video/token: video introuvable', videoError)
-    return NextResponse.json({ error: 'Vidéo introuvable.' }, { status: 404 })
-  }
-
-  if (!video.storage_path) {
-    console.error('video/token: storage_path est null pour video_id', msg.video_id)
+  if (!row.storage_path) {
+    console.error('video/token: pas de fichier vidéo pour video_id', row.video_id)
     return NextResponse.json({ error: 'Pas de fichier vidéo.' }, { status: 404 })
   }
 
-  console.log('video/token: génération URL signée pour', video.storage_path)
-
-  // Générer l'URL signée — 7 jours (même durée que la validité du lien email)
-  const { data: signedData, error: signedError } = await supabase.storage
-    .from('videos')
-    .createSignedUrl(video.storage_path, 7 * 24 * 3600)
-
-  if (signedError || !signedData?.signedUrl) {
-    console.error('video/token: createSignedUrl échoué', {
-      storage_path: video.storage_path,
-      error: signedError,
-    })
-    return NextResponse.json(
-      { error: 'Impossible de générer le lien vidéo.', detail: signedError?.message },
-      { status: 500 }
-    )
+  let signedUrl: string
+  try {
+    // 7 jours (même durée que la validité du lien email)
+    signedUrl = await signedVideoUrl(row.storage_path, 7 * 24 * 3600)
+  } catch (err) {
+    console.error('video/token: signature échouée', { storage_path: row.storage_path, err })
+    return NextResponse.json({ error: 'Impossible de générer le lien vidéo.' }, { status: 500 })
   }
 
-  console.log('video/token: redirection vers URL signée OK')
-
   // Redirection sans cache — URL fraîche à chaque accès
-  return NextResponse.redirect(signedData.signedUrl, {
+  return NextResponse.redirect(signedUrl, {
     status: 302,
     headers: {
       'Cache-Control': 'no-store, no-cache, must-revalidate',

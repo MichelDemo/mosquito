@@ -1,9 +1,19 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { createServerSupabaseClient } from '@/lib/supabase/server'
+import { and, eq } from 'drizzle-orm'
+import { db } from '@/db'
+import { formations } from '@/db/schema'
+import { getUser } from '@/lib/auth/session'
+import { isUuid } from '@/lib/uuid'
+
+// Lit la base à chaque appel : jamais de mise en cache statique de la réponse.
+export const dynamic = 'force-dynamic'
 
 interface RouteParams {
   params: { id: string }
 }
+
+const deCeFormateur = (id: string, formateurId: string) =>
+  and(eq(formations.id, id), eq(formations.formateur_id, formateurId))
 
 // ---------------------------------------------------------------------------
 // GET /api/formations/:id
@@ -11,11 +21,7 @@ interface RouteParams {
 
 export async function GET(_request: NextRequest, { params }: RouteParams) {
   try {
-    const supabase = createServerSupabaseClient()
-
-    const {
-      data: { user },
-    } = await supabase.auth.getUser()
+    const user = await getUser()
 
     if (!user) {
       return NextResponse.json(
@@ -24,19 +30,30 @@ export async function GET(_request: NextRequest, { params }: RouteParams) {
       )
     }
 
-    const { data: formation, error } = await supabase
-      .from('formations')
-      .select(`
-        *,
-        participants(*),
-        formation_topics(*, topics(id, titre, videos(id, titre, ordre))),
-        messages_planifies(*, topics(titre), videos(titre))
-      `)
-      .eq('id', params.id)
-      .eq('formateur_id', user.id)
-      .single()
+    const formation = isUuid(params.id)
+      ? await db.query.formations.findFirst({
+          with: {
+            participants: true,
+            formation_topics: {
+              with: {
+                topics: {
+                  columns: { id: true, titre: true },
+                  with: { videos: { columns: { id: true, titre: true, ordre: true } } },
+                },
+              },
+            },
+            messages_planifies: {
+              with: {
+                topics: { columns: { titre: true } },
+                videos: { columns: { titre: true } },
+              },
+            },
+          },
+          where: deCeFormateur(params.id, user.id),
+        })
+      : undefined
 
-    if (error || !formation) {
+    if (!formation) {
       return NextResponse.json(
         { error: 'Formation introuvable.' },
         { status: 404 }
@@ -59,11 +76,7 @@ export async function GET(_request: NextRequest, { params }: RouteParams) {
 
 export async function PUT(request: NextRequest, { params }: RouteParams) {
   try {
-    const supabase = createServerSupabaseClient()
-
-    const {
-      data: { user },
-    } = await supabase.auth.getUser()
+    const user = await getUser()
 
     if (!user) {
       return NextResponse.json(
@@ -73,12 +86,9 @@ export async function PUT(request: NextRequest, { params }: RouteParams) {
     }
 
     // Verify ownership
-    const { data: existing } = await supabase
-      .from('formations')
-      .select('id')
-      .eq('id', params.id)
-      .eq('formateur_id', user.id)
-      .single()
+    const [existing] = isUuid(params.id)
+      ? await db.select({ id: formations.id }).from(formations).where(deCeFormateur(params.id, user.id)).limit(1)
+      : []
 
     if (!existing) {
       return NextResponse.json(
@@ -107,14 +117,15 @@ export async function PUT(request: NextRequest, { params }: RouteParams) {
       )
     }
 
-    const { data: updated, error } = await supabase
-      .from('formations')
-      .update(updates)
-      .eq('id', params.id)
-      .select('id, nom, statut')
-      .single()
-
-    if (error) {
+    let updated
+    try {
+      ;[updated] = await db
+        .update(formations)
+        // nom/statut à null sont refusés par la base (NOT NULL), comme avant.
+        .set(updates as Partial<typeof formations.$inferInsert>)
+        .where(eq(formations.id, params.id))
+        .returning({ id: formations.id, nom: formations.nom, statut: formations.statut })
+    } catch (error) {
       console.error('Erreur update formation:', error)
       return NextResponse.json(
         { error: 'Erreur lors de la mise à jour.' },
@@ -138,11 +149,7 @@ export async function PUT(request: NextRequest, { params }: RouteParams) {
 
 export async function DELETE(_request: NextRequest, { params }: RouteParams) {
   try {
-    const supabase = createServerSupabaseClient()
-
-    const {
-      data: { user },
-    } = await supabase.auth.getUser()
+    const user = await getUser()
 
     if (!user) {
       return NextResponse.json(
@@ -152,12 +159,9 @@ export async function DELETE(_request: NextRequest, { params }: RouteParams) {
     }
 
     // Verify ownership before deleting
-    const { data: existing } = await supabase
-      .from('formations')
-      .select('id')
-      .eq('id', params.id)
-      .eq('formateur_id', user.id)
-      .single()
+    const [existing] = isUuid(params.id)
+      ? await db.select({ id: formations.id }).from(formations).where(deCeFormateur(params.id, user.id)).limit(1)
+      : []
 
     if (!existing) {
       return NextResponse.json(
@@ -166,12 +170,10 @@ export async function DELETE(_request: NextRequest, { params }: RouteParams) {
       )
     }
 
-    const { error } = await supabase
-      .from('formations')
-      .delete()
-      .eq('id', params.id)
-
-    if (error) {
+    try {
+      // Les participants, messages, envois… suivent (ON DELETE CASCADE).
+      await db.delete(formations).where(eq(formations.id, params.id))
+    } catch (error) {
       console.error('Erreur suppression formation:', error)
       return NextResponse.json(
         { error: 'Erreur lors de la suppression.' },

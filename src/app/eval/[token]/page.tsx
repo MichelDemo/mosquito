@@ -1,5 +1,8 @@
 import { notFound } from 'next/navigation'
-import { createAdminSupabaseClient } from '@/lib/supabase/server'
+import { and, asc, desc, eq, isNotNull } from 'drizzle-orm'
+import { db } from '@/db'
+import { auto_eval_criteres, auto_eval_reponses, auto_evaluations, formations, participants } from '@/db/schema'
+import { isUuid } from '@/lib/uuid'
 import EvalForm from './EvalForm'
 
 interface PageProps {
@@ -8,14 +11,20 @@ interface PageProps {
 
 export default async function PageEval({ params }: PageProps) {
   const { token } = params
-  const supabase = createAdminSupabaseClient()
+  if (!isUuid(token)) notFound()
 
   // Récupérer l'évaluation par token
-  const { data: evaluation } = await supabase
-    .from('auto_evaluations')
-    .select('id, participant_id, formation_id, completee_le, created_at')
-    .eq('token', token)
-    .single()
+  const [evaluation] = await db
+    .select({
+      id: auto_evaluations.id,
+      participant_id: auto_evaluations.participant_id,
+      formation_id: auto_evaluations.formation_id,
+      completee_le: auto_evaluations.completee_le,
+      created_at: auto_evaluations.created_at,
+    })
+    .from(auto_evaluations)
+    .where(eq(auto_evaluations.token, token))
+    .limit(1)
 
   if (!evaluation) notFound()
 
@@ -34,51 +43,56 @@ export default async function PageEval({ params }: PageProps) {
   }
 
   // Récupérer participant, formation, critères en parallèle
-  const [
-    { data: participant },
-    { data: formation },
-    { data: criteres },
-  ] = await Promise.all([
-    supabase.from('participants').select('prenom, nom').eq('id', evaluation.participant_id).single(),
-    supabase.from('formations').select('nom').eq('id', evaluation.formation_id).single(),
-    supabase
-      .from('auto_eval_criteres')
-      .select('id, affirmation, categorie, ordre')
-      .eq('actif', true)
-      .order('ordre'),
+  const [[participant], [formation], criteres] = await Promise.all([
+    db
+      .select({ prenom: participants.prenom, nom: participants.nom })
+      .from(participants)
+      .where(eq(participants.id, evaluation.participant_id))
+      .limit(1),
+    db
+      .select({ nom: formations.nom })
+      .from(formations)
+      .where(eq(formations.id, evaluation.formation_id))
+      .limit(1),
+    db
+      .select({
+        id: auto_eval_criteres.id,
+        affirmation: auto_eval_criteres.affirmation,
+        categorie: auto_eval_criteres.categorie,
+        ordre: auto_eval_criteres.ordre,
+      })
+      .from(auto_eval_criteres)
+      .where(eq(auto_eval_criteres.actif, true))
+      .orderBy(asc(auto_eval_criteres.ordre)),
   ])
 
-  if (!formation || !criteres || criteres.length === 0) notFound()
+  if (!formation || criteres.length === 0) notFound()
+
+  // Évaluations déjà complétées de ce participant pour cette formation
+  const dejaCompletees = and(
+    eq(auto_evaluations.participant_id, evaluation.participant_id),
+    eq(auto_evaluations.formation_id, evaluation.formation_id),
+    isNotNull(auto_evaluations.completee_le)
+  )
 
   // Compter le numéro de cette évaluation pour ce participant
-  const { count } = await supabase
-    .from('auto_evaluations')
-    .select('id', { count: 'exact', head: true })
-    .eq('participant_id', evaluation.participant_id)
-    .eq('formation_id', evaluation.formation_id)
-    .not('completee_le', 'is', null)
-
-  const numeroEval = (count ?? 0) + 1
+  const numeroEval = (await db.$count(auto_evaluations, dejaCompletees)) + 1
 
   // Récupérer les réponses de la dernière évaluation complétée (pour comparaison)
   let precedentes = null
   if (numeroEval > 1) {
-    const { data: derniereEval } = await supabase
-      .from('auto_evaluations')
-      .select('id')
-      .eq('participant_id', evaluation.participant_id)
-      .eq('formation_id', evaluation.formation_id)
-      .not('completee_le', 'is', null)
-      .order('completee_le', { ascending: false })
+    const [derniereEval] = await db
+      .select({ id: auto_evaluations.id })
+      .from(auto_evaluations)
+      .where(dejaCompletees)
+      .orderBy(desc(auto_evaluations.completee_le))
       .limit(1)
-      .single()
 
     if (derniereEval) {
-      const { data: repsDerniere } = await supabase
-        .from('auto_eval_reponses')
-        .select('critere_id, reponse')
-        .eq('evaluation_id', derniereEval.id)
-      precedentes = repsDerniere
+      precedentes = await db
+        .select({ critere_id: auto_eval_reponses.critere_id, reponse: auto_eval_reponses.reponse })
+        .from(auto_eval_reponses)
+        .where(eq(auto_eval_reponses.evaluation_id, derniereEval.id))
     }
   }
 

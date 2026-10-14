@@ -1,5 +1,9 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { createServerSupabaseClient } from '@/lib/supabase/server'
+import { eq, inArray } from 'drizzle-orm'
+import { db } from '@/db'
+import { messages_planifies } from '@/db/schema'
+import { getUser } from '@/lib/auth/session'
+import { isUuid } from '@/lib/uuid'
 
 interface UpdateItem {
   id: string
@@ -8,11 +12,7 @@ interface UpdateItem {
 
 export async function PATCH(request: NextRequest) {
   try {
-    const supabase = createServerSupabaseClient()
-
-    const {
-      data: { user },
-    } = await supabase.auth.getUser()
+    const user = await getUser()
 
     if (!user) {
       return NextResponse.json(
@@ -43,12 +43,16 @@ export async function PATCH(request: NextRequest) {
     const messageIds = updates.map((u) => u.id)
 
     // Verify ownership: all messages must belong to a formation owned by the current user
-    const { data: messages, error: fetchError } = await supabase
-      .from('messages_planifies')
-      .select('id, formation_id, formations(formateur_id)')
-      .in('id', messageIds)
-
-    if (fetchError) {
+    let messages
+    try {
+      messages = messageIds.every(isUuid)
+        ? await db.query.messages_planifies.findMany({
+            columns: { id: true, formation_id: true },
+            with: { formations: { columns: { formateur_id: true } } },
+            where: inArray(messages_planifies.id, messageIds),
+          })
+        : []
+    } catch (fetchError) {
       console.error('Erreur vérification messages:', fetchError)
       return NextResponse.json(
         { error: 'Erreur lors de la vérification des messages.' },
@@ -56,7 +60,7 @@ export async function PATCH(request: NextRequest) {
       )
     }
 
-    if (!messages || messages.length !== messageIds.length) {
+    if (messages.length !== messageIds.length) {
       return NextResponse.json(
         { error: 'Un ou plusieurs messages sont introuvables.' },
         { status: 404 }
@@ -64,8 +68,7 @@ export async function PATCH(request: NextRequest) {
     }
 
     for (const msg of messages) {
-      const formation = (msg.formations as unknown) as { formateur_id: string } | null
-      if (!formation || formation.formateur_id !== user.id) {
+      if (!msg.formations || msg.formations.formateur_id !== user.id) {
         return NextResponse.json(
           { error: 'Accès refusé à un ou plusieurs messages.' },
           { status: 403 }
@@ -73,20 +76,24 @@ export async function PATCH(request: NextRequest) {
       }
     }
 
-    // Apply updates sequentially
-    for (const u of updates) {
-      const { error: updateError } = await supabase
-        .from('messages_planifies')
-        .update({ jours_apres_formation: u.jours_apres_formation })
-        .eq('id', u.id)
-
-      if (updateError) {
-        console.error('Erreur mise à jour message:', u.id, updateError)
-        return NextResponse.json(
-          { error: `Erreur lors de la mise à jour du message ${u.id}.` },
-          { status: 500 }
-        )
-      }
+    // Toutes les mises à jour ou aucune
+    let enCours = ''
+    try {
+      await db.transaction(async (tx) => {
+        for (const u of updates) {
+          enCours = u.id
+          await tx
+            .update(messages_planifies)
+            .set({ jours_apres_formation: u.jours_apres_formation })
+            .where(eq(messages_planifies.id, u.id))
+        }
+      })
+    } catch (updateError) {
+      console.error('Erreur mise à jour message:', enCours, updateError)
+      return NextResponse.json(
+        { error: `Erreur lors de la mise à jour du message ${enCours}.` },
+        { status: 500 }
+      )
     }
 
     return NextResponse.json({ success: true })

@@ -1,13 +1,15 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { createServerSupabaseClient } from '@/lib/supabase/server'
+import { eq } from 'drizzle-orm'
+import { db } from '@/db'
+import { topics } from '@/db/schema'
+import { getUser } from '@/lib/auth/session'
+import { isUuid } from '@/lib/uuid'
 
 type RouteParams = { params: { id: string } }
 
 export async function PUT(request: NextRequest, { params }: RouteParams) {
   try {
-    const supabase = createServerSupabaseClient()
-
-    const { data: { user } } = await supabase.auth.getUser()
+    const user = await getUser()
     if (!user) {
       return NextResponse.json(
         { error: 'Vous devez être connecté pour effectuer cette action' },
@@ -37,17 +39,19 @@ export async function PUT(request: NextRequest, { params }: RouteParams) {
       )
     }
 
-    const { data: topic, error } = await supabase
-      .from('topics')
-      .update({
-        titre: titre.trim(),
-        description: description?.trim() || null,
-      })
-      .eq('id', id)
-      .select()
-      .single()
-
-    if (error) {
+    let topic
+    try {
+      ;[topic] = isUuid(id)
+        ? await db
+            .update(topics)
+            .set({
+              titre: titre.trim(),
+              description: description?.trim() || null,
+            })
+            .where(eq(topics.id, id))
+            .returning()
+        : []
+    } catch {
       return NextResponse.json(
         { error: 'Erreur lors de la mise à jour du topic' },
         { status: 500 }
@@ -72,9 +76,7 @@ export async function PUT(request: NextRequest, { params }: RouteParams) {
 
 export async function DELETE(_request: NextRequest, { params }: RouteParams) {
   try {
-    const supabase = createServerSupabaseClient()
-
-    const { data: { user } } = await supabase.auth.getUser()
+    const user = await getUser()
     if (!user) {
       return NextResponse.json(
         { error: 'Vous devez être connecté pour effectuer cette action' },
@@ -87,16 +89,10 @@ export async function DELETE(_request: NextRequest, { params }: RouteParams) {
       return NextResponse.json({ error: 'Identifiant manquant' }, { status: 400 })
     }
 
-    // Cascade: delete related videos and quiz questions first
-    await supabase.from('quiz_questions').delete().eq('topic_id', id)
-    await supabase.from('videos').delete().eq('topic_id', id)
-
-    const { error } = await supabase
-      .from('topics')
-      .delete()
-      .eq('id', id)
-
-    if (error) {
+    try {
+      // Vidéos et questions du topic suivent (ON DELETE CASCADE).
+      if (isUuid(id)) await db.delete(topics).where(eq(topics.id, id))
+    } catch {
       return NextResponse.json(
         { error: 'Erreur lors de la suppression du topic' },
         { status: 500 }

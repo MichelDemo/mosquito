@@ -1,13 +1,15 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { createServerSupabaseClient } from '@/lib/supabase/server'
+import { eq } from 'drizzle-orm'
+import { db } from '@/db'
+import { quiz_questions } from '@/db/schema'
+import { getUser } from '@/lib/auth/session'
+import { isUuid } from '@/lib/uuid'
 
 type RouteParams = { params: { id: string } }
 
 export async function PUT(request: NextRequest, { params }: RouteParams) {
   try {
-    const supabase = createServerSupabaseClient()
-
-    const { data: { user } } = await supabase.auth.getUser()
+    const user = await getUser()
     if (!user) {
       return NextResponse.json(
         { error: 'Vous devez être connecté pour effectuer cette action' },
@@ -52,20 +54,22 @@ export async function PUT(request: NextRequest, { params }: RouteParams) {
       )
     }
 
-    const { data: quizQuestion, error } = await supabase
-      .from('quiz_questions')
-      .update({
-        question: question.trim(),
-        options: options.map((o: string) => o.trim()),
-        bonne_reponse: bonneReponseNum,
-        feedback_correct: feedback_correct?.trim() || null,
-        feedback_incorrect: feedback_incorrect?.trim() || null,
-      })
-      .eq('id', id)
-      .select()
-      .single()
-
-    if (error) {
+    let quizQuestion
+    try {
+      ;[quizQuestion] = isUuid(id)
+        ? await db
+            .update(quiz_questions)
+            .set({
+              question: question.trim(),
+              options: options.map((o: string) => o.trim()),
+              bonne_reponse: bonneReponseNum,
+              feedback_correct: feedback_correct?.trim() || null,
+              feedback_incorrect: feedback_incorrect?.trim() || null,
+            })
+            .where(eq(quiz_questions.id, id))
+            .returning()
+        : []
+    } catch {
       return NextResponse.json(
         { error: 'Erreur lors de la mise à jour de la question' },
         { status: 500 }
@@ -87,9 +91,7 @@ export async function PUT(request: NextRequest, { params }: RouteParams) {
 
 export async function DELETE(_request: NextRequest, { params }: RouteParams) {
   try {
-    const supabase = createServerSupabaseClient()
-
-    const { data: { user } } = await supabase.auth.getUser()
+    const user = await getUser()
     if (!user) {
       return NextResponse.json(
         { error: 'Vous devez être connecté pour effectuer cette action' },
@@ -102,12 +104,9 @@ export async function DELETE(_request: NextRequest, { params }: RouteParams) {
       return NextResponse.json({ error: 'Identifiant manquant' }, { status: 400 })
     }
 
-    const { error } = await supabase
-      .from('quiz_questions')
-      .delete()
-      .eq('id', id)
-
-    if (error) {
+    try {
+      if (isUuid(id)) await db.delete(quiz_questions).where(eq(quiz_questions.id, id))
+    } catch {
       return NextResponse.json(
         { error: 'Erreur lors de la suppression de la question' },
         { status: 500 }

@@ -1,5 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { createAdminSupabaseClient } from '@/lib/supabase/server'
+import { eq } from 'drizzle-orm'
+import { db } from '@/db'
+import { envois_participants, messages_planifies, quiz_questions, quiz_reponses } from '@/db/schema'
+import { isUuid } from '@/lib/uuid'
 
 interface ReponseItem {
   question_id: string
@@ -23,16 +26,20 @@ export async function POST(request: NextRequest) {
       )
     }
 
-    const supabase = createAdminSupabaseClient()
-
     // Vérifier le token
-    const { data: envoi, error: envoisError } = await supabase
-      .from('envois_participants')
-      .select('id, quiz_complete, message_id')
-      .eq('token', token)
-      .single()
+    const [envoi] = isUuid(token)
+      ? await db
+          .select({
+            id: envois_participants.id,
+            quiz_complete: envois_participants.quiz_complete,
+            message_id: envois_participants.message_id,
+          })
+          .from(envois_participants)
+          .where(eq(envois_participants.token, token))
+          .limit(1)
+      : []
 
-    if (envoisError || !envoi) {
+    if (!envoi) {
       return NextResponse.json(
         { error: 'Lien invalide ou expiré.' },
         { status: 404 }
@@ -47,11 +54,11 @@ export async function POST(request: NextRequest) {
     }
 
     // Récupérer les questions du topic associé
-    const { data: message } = await supabase
-      .from('messages_planifies')
-      .select('topic_id')
-      .eq('id', envoi.message_id)
-      .single()
+    const [message] = await db
+      .select({ topic_id: messages_planifies.topic_id })
+      .from(messages_planifies)
+      .where(eq(messages_planifies.id, envoi.message_id))
+      .limit(1)
 
     if (!message) {
       return NextResponse.json(
@@ -60,12 +67,17 @@ export async function POST(request: NextRequest) {
       )
     }
 
-    const { data: questions } = await supabase
-      .from('quiz_questions')
-      .select('id, bonne_reponse, feedback_correct, feedback_incorrect')
-      .eq('topic_id', message.topic_id)
+    const questions = await db
+      .select({
+        id: quiz_questions.id,
+        bonne_reponse: quiz_questions.bonne_reponse,
+        feedback_correct: quiz_questions.feedback_correct,
+        feedback_incorrect: quiz_questions.feedback_incorrect,
+      })
+      .from(quiz_questions)
+      .where(eq(quiz_questions.topic_id, message.topic_id))
 
-    if (!questions || questions.length === 0) {
+    if (questions.length === 0) {
       return NextResponse.json(
         { error: 'Aucune question trouvée pour ce sujet.' },
         { status: 404 }
@@ -120,24 +132,23 @@ export async function POST(request: NextRequest) {
       })
     }
 
-    // Sauvegarder les réponses
-    const { error: insertError } = await supabase
-      .from('quiz_reponses')
-      .insert(insertions)
-
-    if (insertError) {
+    // Sauvegarder les réponses et marquer le quiz comme complété, ensemble
+    try {
+      await db.transaction(async (tx) => {
+        if (insertions.length > 0) await tx.insert(quiz_reponses).values(insertions)
+        await tx
+          .update(envois_participants)
+          .set({ quiz_complete: true })
+          .where(eq(envois_participants.id, envoi.id))
+      })
+    } catch (insertError) {
       console.error('Erreur insertion quiz_reponses:', insertError)
+      const pgError = insertError as { message?: string; code?: string }
       return NextResponse.json(
-        { error: 'Erreur lors de la sauvegarde des réponses.', details: insertError.message, code: insertError.code },
+        { error: 'Erreur lors de la sauvegarde des réponses.', details: pgError.message, code: pgError.code },
         { status: 500 }
       )
     }
-
-    // Marquer le quiz comme complété
-    await supabase
-      .from('envois_participants')
-      .update({ quiz_complete: true })
-      .eq('id', envoi.id)
 
     return NextResponse.json({
       score: nbCorrectes,

@@ -1,6 +1,10 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { createServerSupabaseClient, createAdminSupabaseClient } from '@/lib/supabase/server'
+import { and, eq, ne } from 'drizzle-orm'
+import { db } from '@/db'
+import { envois_participants, messages_planifies } from '@/db/schema'
+import { getUser } from '@/lib/auth/session'
 import { envoyerEmailRappel, envoyerWhatsAppRappel } from '@/lib/email/brevo'
+import { isUuid } from '@/lib/uuid'
 
 interface RouteContext {
   params: { id: string }
@@ -11,62 +15,45 @@ export async function POST(request: NextRequest, { params }: RouteContext) {
 
   try {
     // Vérifier l'authentification
-    const supabaseAuth = createServerSupabaseClient()
-    const { data: { user }, error: authError } = await supabaseAuth.auth.getUser()
+    const user = await getUser()
 
-
-    if (authError || !user) {
+    if (!user) {
       return NextResponse.json(
         { error: 'Authentification requise.' },
         { status: 401 }
       )
     }
 
-    const supabase = createAdminSupabaseClient()
-
     // Récupérer le message avec vérification de l'appartenance à la formation du formateur
-    const { data: message, error: messageError } = await supabase
-      .from('messages_planifies')
-      .select(`
-        id,
-        statut,
-        type_planification,
-        date_envoi,
-        jours_apres_formation,
-        formation_id,
-        topic_id,
-        video_id,
-        formations (
-          id,
-          nom,
-          formateur_id,
-          date_formation
-        ),
-        topics (
-          titre
-        ),
-        videos (
-          titre,
-          vimeo_id
-        )
-      `)
-      .eq('id', messageId)
-      .single()
+    const message = isUuid(messageId)
+      ? await db.query.messages_planifies.findFirst({
+          columns: {
+            id: true,
+            statut: true,
+            type_planification: true,
+            date_envoi: true,
+            jours_apres_formation: true,
+            formation_id: true,
+            topic_id: true,
+            video_id: true,
+          },
+          with: {
+            formations: { columns: { id: true, nom: true, formateur_id: true, date_formation: true } },
+            topics: { columns: { titre: true } },
+            videos: { columns: { titre: true, vimeo_id: true } },
+          },
+          where: eq(messages_planifies.id, messageId),
+        })
+      : undefined
 
-    if (messageError || !message) {
+    if (!message) {
       return NextResponse.json(
         { error: 'Message introuvable.' },
         { status: 404 }
       )
     }
 
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const formation = message.formations as any as {
-      id: string
-      nom: string
-      formateur_id: string
-      date_formation: string | null
-    } | null
+    const formation = message.formations
 
     // Vérifier que le formateur connecté est propriétaire de la formation
     if (!formation || formation.formateur_id !== user.id) {
@@ -76,10 +63,8 @@ export async function POST(request: NextRequest, { params }: RouteContext) {
       )
     }
 
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const topic = message.topics as any as { titre: string } | null
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const video = message.videos as any as { titre: string; vimeo_id: string } | null
+    const topic = message.topics
+    const video = message.videos
 
     if (!topic || !video) {
       return NextResponse.json(
@@ -89,24 +74,25 @@ export async function POST(request: NextRequest, { params }: RouteContext) {
     }
 
     // Récupérer tous les envois non désabonnés pour ce message
-    const { data: envois, error: envoisError } = await supabase
-      .from('envois_participants')
-      .select(`
-        id,
-        token,
-        participants (
-          prenom,
-          nom,
-          email,
-          telephone,
-          canal_email,
-          canal_whatsapp
-        )
-      `)
-      .eq('message_id', messageId)
-      .neq('desabonne', true)
-
-    if (envoisError) {
+    let envois
+    try {
+      envois = await db.query.envois_participants.findMany({
+        columns: { id: true, token: true },
+        with: {
+          participants: {
+            columns: {
+              prenom: true,
+              nom: true,
+              email: true,
+              telephone: true,
+              canal_email: true,
+              canal_whatsapp: true,
+            },
+          },
+        },
+        where: and(eq(envois_participants.message_id, messageId), ne(envois_participants.desabonne, true)),
+      })
+    } catch (envoisError) {
       console.error('Erreur récupération envois:', envoisError)
       return NextResponse.json(
         { error: 'Erreur lors de la récupération des destinataires.' },
@@ -114,7 +100,7 @@ export async function POST(request: NextRequest, { params }: RouteContext) {
       )
     }
 
-    if (!envois || envois.length === 0) {
+    if (envois.length === 0) {
       return NextResponse.json({ envoyes: 0, message: 'Aucun envoi en attente.' })
     }
 
@@ -123,15 +109,7 @@ export async function POST(request: NextRequest, { params }: RouteContext) {
     const now = new Date()
 
     for (const envoi of envois) {
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const participant = envoi.participants as any as {
-        prenom: string
-        nom: string
-        email: string
-        telephone: string | null
-        canal_email: boolean
-        canal_whatsapp: boolean
-      } | null
+      const participant = envoi.participants
 
       if (!participant) {
         erreurs.push(`Envoi ${envoi.id}: participant manquant.`)
@@ -179,25 +157,25 @@ export async function POST(request: NextRequest, { params }: RouteContext) {
       }
 
       if (envoiOk) {
-        await supabase
-          .from('envois_participants')
-          .update({ statut: 'envoye', envoye_le: now.toISOString() })
-          .eq('id', envoi.id)
+        await db
+          .update(envois_participants)
+          .set({ statut: 'envoye', envoye_le: now.toISOString() })
+          .where(eq(envois_participants.id, envoi.id))
         envoyes++
       } else {
-        await supabase
-          .from('envois_participants')
-          .update({ statut: 'erreur' })
-          .eq('id', envoi.id)
+        await db
+          .update(envois_participants)
+          .set({ statut: 'erreur' })
+          .where(eq(envois_participants.id, envoi.id))
       }
     }
 
     // Mettre à jour le statut du message si tous les envois sont traités
     if (envoyes > 0) {
-      await supabase
-        .from('messages_planifies')
-        .update({ statut: 'envoye' })
-        .eq('id', messageId)
+      await db
+        .update(messages_planifies)
+        .set({ statut: 'envoye' })
+        .where(eq(messages_planifies.id, messageId))
     }
 
     return NextResponse.json({ envoyes, erreurs })

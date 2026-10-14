@@ -1,5 +1,8 @@
 import { notFound } from 'next/navigation'
-import { createAdminSupabaseClient } from '@/lib/supabase/server'
+import { and, asc, eq, isNull } from 'drizzle-orm'
+import { db } from '@/db'
+import { envois_participants, quiz_questions } from '@/db/schema'
+import { isUuid } from '@/lib/uuid'
 import QuizSection from './QuizSection'
 import VideoPlayer from '@/components/VideoPlayer'
 import ReminderPreferences from '@/components/ReminderPreferences'
@@ -8,56 +11,44 @@ interface PageProps {
   params: { token: string }
 }
 
-async function marquerOuvert(token: string) {
-  const supabase = createAdminSupabaseClient()
-  const { data: envoi } = await supabase
-    .from('envois_participants')
-    .select('id, ouvert_le')
-    .eq('token', token)
-    .single()
-
-  if (envoi && !envoi.ouvert_le) {
-    await supabase
-      .from('envois_participants')
-      .update({ ouvert_le: new Date().toISOString() })
-      .eq('id', envoi.id)
-  }
+async function marquerOuvert(envoiId: string) {
+  await db
+    .update(envois_participants)
+    .set({ ouvert_le: new Date().toISOString() })
+    .where(and(eq(envois_participants.id, envoiId), isNull(envois_participants.ouvert_le)))
 }
 
 export default async function PageVideo({ params }: PageProps) {
   const { token } = params
-  const supabase = createAdminSupabaseClient()
+  if (!isUuid(token)) notFound()
 
-  // Étape 1 : récupérer l'envoi de base
-  const { data: envoi } = await supabase
-    .from('envois_participants')
-    .select('id, quiz_complete, participant_id, message_id, envoye_le')
-    .eq('token', token)
-    .single()
+  // Envoi → participant, et message → formation, topic, vidéo
+  const envoi = await db.query.envois_participants.findFirst({
+    columns: { id: true, quiz_complete: true, participant_id: true, message_id: true, envoye_le: true },
+    with: {
+      participants: { columns: { prenom: true, nom: true } },
+      messages_planifies: {
+        columns: { topic_id: true, video_id: true, formation_id: true },
+        with: {
+          formations: { columns: { nom: true } },
+          topics: { columns: { titre: true } },
+          videos: { columns: { titre: true, vimeo_id: true, storage_path: true } },
+        },
+      },
+    },
+    where: eq(envois_participants.token, token),
+  })
 
   if (!envoi) notFound()
 
-  // Étape 2 : récupérer le participant
-  const { data: participant } = await supabase
-    .from('participants')
-    .select('prenom, nom')
-    .eq('id', envoi.participant_id)
-    .single()
-
-  // Étape 3 : récupérer le message avec topic, vidéo et formation
-  const { data: msg } = await supabase
-    .from('messages_planifies')
-    .select('topic_id, video_id, formation_id')
-    .eq('id', envoi.message_id)
-    .single()
+  const participant = envoi.participants
+  const msg = envoi.messages_planifies
 
   if (!msg) notFound()
 
-  const [{ data: formation }, { data: topic }, { data: video }] = await Promise.all([
-    supabase.from('formations').select('nom').eq('id', msg.formation_id).single(),
-    supabase.from('topics').select('titre').eq('id', msg.topic_id).single(),
-    supabase.from('videos').select('titre, vimeo_id, storage_path').eq('id', msg.video_id).single(),
-  ])
+  const formation = msg.formations
+  const topic = msg.topics
+  const video = msg.videos
 
   if (!formation || !topic || !video) notFound()
 
@@ -82,7 +73,7 @@ export default async function PageVideo({ params }: PageProps) {
     }
   }
 
-  await marquerOuvert(token)
+  await marquerOuvert(envoi.id)
 
   // URL via la route API dédiée (évite les problèmes de signed URL SSR)
   const videoUrl: string | null = video.storage_path
@@ -90,11 +81,17 @@ export default async function PageVideo({ params }: PageProps) {
     : null
 
   // Questions du quiz
-  const { data: questions } = await supabase
-    .from('quiz_questions')
-    .select('id, question, options, bonne_reponse, explication')
-    .eq('topic_id', msg.topic_id)
-    .order('created_at')
+  const questions = await db
+    .select({
+      id: quiz_questions.id,
+      question: quiz_questions.question,
+      options: quiz_questions.options,
+      bonne_reponse: quiz_questions.bonne_reponse,
+      explication: quiz_questions.explication,
+    })
+    .from(quiz_questions)
+    .where(eq(quiz_questions.topic_id, msg.topic_id))
+    .orderBy(asc(quiz_questions.created_at))
 
   return (
     <div className="min-h-screen bg-gray-50">

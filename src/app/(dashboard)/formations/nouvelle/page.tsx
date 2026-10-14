@@ -7,7 +7,6 @@ import { zodResolver } from '@hookform/resolvers/zod'
 import { z } from 'zod'
 import { toast } from 'sonner'
 import { ChevronRight, ChevronLeft, Check, Upload, X, Calendar } from 'lucide-react'
-import { createClientSupabaseClient } from '@/lib/supabase/client'
 
 // ---------------------------------------------------------------------------
 // Types & Schema
@@ -477,11 +476,8 @@ export default function NouvelleFormationPage() {
   // Load topics library once on step 1 → 2 transition
   const loadTopics = async () => {
     if (topicsLoaded) return
-    const supabase = createClientSupabaseClient()
-    const { data } = await supabase
-      .from('topics')
-      .select('id, titre, videos(id, titre, ordre)')
-      .order('titre')
+    const res = await fetch('/api/topics/avec-videos')
+    const { data } = res.ok ? await res.json() : { data: null }
     if (data) {
       const mapped: TopicWithVideos[] = (data as any[]).map((t) => ({
         id: t.id,

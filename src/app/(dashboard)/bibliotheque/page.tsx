@@ -1,6 +1,6 @@
 export const dynamic = 'force-dynamic'
 
-import { createServerSupabaseClient } from '@/lib/supabase/server'
+import { topicsAvecNombreDeVideos } from '@/db/queries'
 import Link from 'next/link'
 import { BookOpen, Video, ClipboardList } from 'lucide-react'
 import TopicForm from './TopicForm'
@@ -16,14 +16,9 @@ type TopicWithCount = {
 }
 
 export default async function BibliotequePage() {
-  const supabase = createServerSupabaseClient()
+  const topics = await topicsAvecNombreDeVideos()
 
-  const { data: topics, error } = await supabase
-    .from('topics')
-    .select('*, videos(count)')
-    .order('created_at', { ascending: false })
-
-  const topicsWithCount: TopicWithCount[] = (topics ?? []).map((t: any) => ({
+  const topicsWithCount: TopicWithCount[] = topics.map((t) => ({
     id: t.id,
     titre: t.titre,
     description: t.description,

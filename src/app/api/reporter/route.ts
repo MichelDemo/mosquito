@@ -1,6 +1,9 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { createAdminSupabaseClient } from '@/lib/supabase/server'
+import { and, eq, ne } from 'drizzle-orm'
 import { addWeeks, addMonths } from 'date-fns'
+import { db } from '@/db'
+import { envois_participants, messages_planifies } from '@/db/schema'
+import { isUuid } from '@/lib/uuid'
 
 // Délais proposés au destinataire pour décaler son prochain rappel.
 const DELAIS = {
@@ -22,14 +25,18 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: 'Délai invalide.' }, { status: 400 })
   }
 
-  const supabase = createAdminSupabaseClient()
-
   // Identifier l'envoi (et le participant) via le token reçu
-  const { data: envoiActuel } = await supabase
-    .from('envois_participants')
-    .select('id, participant_id, message_id')
-    .eq('token', token)
-    .single()
+  const [envoiActuel] = isUuid(token)
+    ? await db
+        .select({
+          id: envois_participants.id,
+          participant_id: envois_participants.participant_id,
+          message_id: envois_participants.message_id,
+        })
+        .from(envois_participants)
+        .where(eq(envois_participants.token, token))
+        .limit(1)
+    : []
 
   if (!envoiActuel) {
     return NextResponse.json({ error: 'Lien invalide.' }, { status: 404 })
@@ -38,12 +45,15 @@ export async function POST(request: NextRequest) {
   const reporterA = DELAIS[delai as DelaiKey](new Date()).toISOString()
 
   // Rappels encore en attente de ce participant (non désabonnés).
-  const { data: enAttente } = await supabase
-    .from('envois_participants')
-    .select('id, message_id, messages_planifies ( numero_ordre )')
-    .eq('participant_id', envoiActuel.participant_id)
-    .eq('statut', 'en_attente')
-    .neq('desabonne', true)
+  const enAttente = await db.query.envois_participants.findMany({
+    columns: { id: true, message_id: true },
+    with: { messages_planifies: { columns: { numero_ordre: true } } },
+    where: and(
+      eq(envois_participants.participant_id, envoiActuel.participant_id),
+      eq(envois_participants.statut, 'en_attente'),
+      ne(envois_participants.desabonne, true)
+    ),
+  })
 
   // Cible à décaler :
   //  - s'il existe des rappels à venir, on décale le prochain (numero_ordre min) ;
@@ -53,12 +63,10 @@ export async function POST(request: NextRequest) {
   let cibleMessageId: string
   let reArmer = false
 
-  if (enAttente && enAttente.length > 0) {
+  if (enAttente.length > 0) {
     const prochain = [...enAttente].sort((a, b) => {
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const oa = (a.messages_planifies as any)?.numero_ordre ?? Number.MAX_SAFE_INTEGER
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const ob = (b.messages_planifies as any)?.numero_ordre ?? Number.MAX_SAFE_INTEGER
+      const oa = a.messages_planifies?.numero_ordre ?? Number.MAX_SAFE_INTEGER
+      const ob = b.messages_planifies?.numero_ordre ?? Number.MAX_SAFE_INTEGER
       return oa - ob
     })[0]
     cibleEnvoiId = prochain.id
@@ -69,32 +77,22 @@ export async function POST(request: NextRequest) {
     reArmer = true
   }
 
-  const { error: updateError } = await supabase
-    .from('envois_participants')
-    .update(
-      reArmer
-        ? { reporter_a: reporterA, statut: 'en_attente' }
-        : { reporter_a: reporterA }
-    )
-    .eq('id', cibleEnvoiId)
+  try {
+    await db.transaction(async (tx) => {
+      await tx
+        .update(envois_participants)
+        .set(reArmer ? { reporter_a: reporterA, statut: 'en_attente' } : { reporter_a: reporterA })
+        .where(eq(envois_participants.id, cibleEnvoiId))
 
-  if (updateError) {
-    console.error('Erreur report rappel (envoi):', updateError)
-    return NextResponse.json(
-      { error: 'Impossible de décaler le rappel.' },
-      { status: 500 }
-    )
-  }
-
-  // S'assurer que le message parent sera repris par le cron (le décalage est
-  // appliqué côté envoi via reporter_a). No-op si le message est déjà en attente.
-  const { error: messageError } = await supabase
-    .from('messages_planifies')
-    .update({ statut: 'en_attente' })
-    .eq('id', cibleMessageId)
-
-  if (messageError) {
-    console.error('Erreur report rappel (message):', messageError)
+      // S'assurer que le message parent sera repris par le cron (le décalage est
+      // appliqué côté envoi via reporter_a). No-op si le message est déjà en attente.
+      await tx
+        .update(messages_planifies)
+        .set({ statut: 'en_attente' })
+        .where(eq(messages_planifies.id, cibleMessageId))
+    })
+  } catch (err) {
+    console.error('Erreur report rappel:', err)
     return NextResponse.json(
       { error: 'Impossible de décaler le rappel.' },
       { status: 500 }

@@ -1,15 +1,15 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { createServerSupabaseClient } from '@/lib/supabase/server'
+import { and, eq } from 'drizzle-orm'
+import { db } from '@/db'
+import { envois_participants, formations, messages_planifies, participants } from '@/db/schema'
+import { getUser } from '@/lib/auth/session'
+import { isUuid } from '@/lib/uuid'
 
 const EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
 
 export async function POST(request: NextRequest) {
   try {
-    const supabase = createServerSupabaseClient()
-
-    const {
-      data: { user },
-    } = await supabase.auth.getUser()
+    const user = await getUser()
 
     if (!user) {
       return NextResponse.json(
@@ -51,12 +51,13 @@ export async function POST(request: NextRequest) {
     }
 
     // Verify the formation belongs to the current user
-    const { data: formation } = await supabase
-      .from('formations')
-      .select('id')
-      .eq('id', formation_id)
-      .eq('formateur_id', user.id)
-      .single()
+    const [formation] = isUuid(formation_id)
+      ? await db
+          .select({ id: formations.id, statut: formations.statut })
+          .from(formations)
+          .where(and(eq(formations.id, formation_id), eq(formations.formateur_id, user.id)))
+          .limit(1)
+      : []
 
     if (!formation) {
       return NextResponse.json(
@@ -66,12 +67,11 @@ export async function POST(request: NextRequest) {
     }
 
     // Check for duplicate email in this formation
-    const { data: existing } = await supabase
-      .from('participants')
-      .select('id')
-      .eq('formation_id', formation_id)
-      .eq('email', email.trim().toLowerCase())
-      .single()
+    const [existing] = await db
+      .select({ id: participants.id })
+      .from(participants)
+      .where(and(eq(participants.formation_id, formation_id), eq(participants.email, email.trim().toLowerCase())))
+      .limit(1)
 
     if (existing) {
       return NextResponse.json(
@@ -80,52 +80,48 @@ export async function POST(request: NextRequest) {
       )
     }
 
-    const { data: participant, error } = await supabase
-      .from('participants')
-      .insert({
-        formation_id,
-        prenom: prenom.trim(),
-        nom: nom.trim(),
-        email: email.trim().toLowerCase(),
-        telephone: telephone?.trim() || null,
-        canal_email: canal_email !== false,
-        canal_whatsapp: canal_whatsapp === true,
-      })
-      .select()
-      .single()
+    let participant
+    try {
+      participant = await db.transaction(async (tx) => {
+        const [created] = await tx
+          .insert(participants)
+          .values({
+            formation_id,
+            prenom: prenom.trim(),
+            nom: nom.trim(),
+            email: email.trim().toLowerCase(),
+            telephone: telephone?.trim() || null,
+            canal_email: canal_email !== false,
+            canal_whatsapp: canal_whatsapp === true,
+          })
+          .returning()
 
-    if (error) {
+        // Si la formation est active, créer les envois_participants pour ce nouveau participant
+        if (formation.statut === 'active') {
+          const messages = await tx
+            .select({ id: messages_planifies.id })
+            .from(messages_planifies)
+            .where(eq(messages_planifies.formation_id, formation_id))
+
+          if (messages.length > 0) {
+            await tx.insert(envois_participants).values(
+              messages.map((msg) => ({
+                participant_id: created.id,
+                message_id: msg.id,
+                token: crypto.randomUUID(),
+                statut: 'en_attente' as const,
+              }))
+            )
+          }
+        }
+        return created
+      })
+    } catch (error) {
       console.error('Erreur ajout participant:', error)
       return NextResponse.json(
         { error: "Erreur lors de l'ajout du participant." },
         { status: 500 }
       )
-    }
-
-    // Si la formation est active, créer les envois_participants pour ce nouveau participant
-    const { data: formationActive } = await supabase
-      .from('formations')
-      .select('statut')
-      .eq('id', formation_id)
-      .single()
-
-    if (formationActive?.statut === 'active') {
-      const adminSupabase = (await import('@/lib/supabase/server')).createAdminSupabaseClient()
-
-      const { data: messages } = await adminSupabase
-        .from('messages_planifies')
-        .select('id')
-        .eq('formation_id', formation_id)
-
-      if (messages && messages.length > 0) {
-        const envois = messages.map((msg) => ({
-          participant_id: participant.id,
-          message_id: msg.id,
-          token: crypto.randomUUID(),
-          statut: 'en_attente' as const,
-        }))
-        await adminSupabase.from('envois_participants').insert(envois)
-      }
     }
 
     return NextResponse.json(participant, { status: 201 })
