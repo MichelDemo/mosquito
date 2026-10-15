@@ -11,6 +11,9 @@ const pool =
   new Pool({
     connectionString: process.env.DATABASE_URL,
     max: 5,
+    // Fuseau de session en UTC, comme Supabase : une date sans fuseau ('2026-10-14')
+    // est interprétée de la même façon quel que soit le réglage du serveur.
+    options: '-c TimeZone=UTC',
   })
 
 if (process.env.NODE_ENV !== 'production') globalForDb.mosquitoPool = pool

@@ -54,9 +54,10 @@ export async function PUT(
   const body = await request.json()
   const { type_planification, date_envoi, jours_apres_formation, video_id } = body
 
+  let updated: { id: string }[] = []
   try {
     if (isUuid(params.id)) {
-      await db
+      updated = await db
         .update(messages_planifies)
         .set({ type_planification, date_envoi, jours_apres_formation, video_id })
         .where(
@@ -65,11 +66,15 @@ export async function PUT(
             inArray(messages_planifies.formation_id, formationsDuFormateur(user.id))
           )
         )
+        .returning({ id: messages_planifies.id })
     }
   } catch (err) {
     console.error('Erreur mise à jour message:', err)
     return NextResponse.json({ error: 'Erreur lors de la mise à jour.' }, { status: 500 })
   }
+
+  // Message inexistant ou d'un autre formateur : rien n'a été modifié.
+  if (updated.length === 0) return NextResponse.json({ error: 'Message introuvable.' }, { status: 404 })
 
   return NextResponse.json({ success: true })
 }
