@@ -11,6 +11,8 @@ node_modules
 # Large dump files
 elao_prod.sql
 *.sql
+# …sauf les migrations versionnées, appliquées automatiquement au démarrage
+!drizzle/*.sql
 
 # Claude Code internals
 .claude/
@@ -18,3 +20,6 @@ elao_prod.sql
 .swarm/
 .mcp.json
 .DS_Store
+
+# Cache TypeScript
+*.tsbuildinfo

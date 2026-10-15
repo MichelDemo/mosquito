@@ -1,21 +1,28 @@
 export const dynamic = 'force-dynamic'
 
-import { createServerSupabaseClient, createAdminSupabaseClient } from '@/lib/supabase/server'
+import { asc, eq } from 'drizzle-orm'
+import { db } from '@/db'
+import { auto_eval_criteres } from '@/db/schema'
+import { getUser } from '@/lib/auth/session'
 import { redirect } from 'next/navigation'
 import { ClipboardList } from 'lucide-react'
 import CriteresManager from './CriteresManager'
 
 export default async function AutoEvaluationPage() {
-  const supabase = createServerSupabaseClient()
-  const { data: { user } } = await supabase.auth.getUser()
+  const user = await getUser()
   if (!user) redirect('/connexion')
 
-  const admin = createAdminSupabaseClient()
-  const { data: criteres } = await admin
-    .from('auto_eval_criteres')
-    .select('id, affirmation, categorie, ordre, actif')
-    .eq('actif', true)
-    .order('ordre')
+  const criteres = await db
+    .select({
+      id: auto_eval_criteres.id,
+      affirmation: auto_eval_criteres.affirmation,
+      categorie: auto_eval_criteres.categorie,
+      ordre: auto_eval_criteres.ordre,
+      actif: auto_eval_criteres.actif,
+    })
+    .from(auto_eval_criteres)
+    .where(eq(auto_eval_criteres.actif, true))
+    .orderBy(asc(auto_eval_criteres.ordre))
 
   return (
     <div className="min-h-screen bg-gray-50">
@@ -28,7 +35,7 @@ export default async function AutoEvaluationPage() {
           </div>
         </div>
         <div className="bg-white rounded-2xl border border-gray-200 shadow-sm p-6">
-          <CriteresManager criteres={criteres ?? []} />
+          <CriteresManager criteres={criteres} />
         </div>
       </div>
     </div>

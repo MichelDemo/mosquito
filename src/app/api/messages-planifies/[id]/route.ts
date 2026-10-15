@@ -1,5 +1,9 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { createServerSupabaseClient } from '@/lib/supabase/server'
+import { eq } from 'drizzle-orm'
+import { db } from '@/db'
+import { messages_planifies } from '@/db/schema'
+import { getUser } from '@/lib/auth/session'
+import { isUuid } from '@/lib/uuid'
 
 interface RouteParams {
   params: { id: string }
@@ -7,11 +11,7 @@ interface RouteParams {
 
 export async function DELETE(_request: NextRequest, { params }: RouteParams) {
   try {
-    const supabase = createServerSupabaseClient()
-
-    const {
-      data: { user },
-    } = await supabase.auth.getUser()
+    const user = await getUser()
 
     if (!user) {
       return NextResponse.json(
@@ -21,42 +21,26 @@ export async function DELETE(_request: NextRequest, { params }: RouteParams) {
     }
 
     // Verify ownership via formation
-    const { data: message } = await supabase
-      .from('messages_planifies')
-      .select('id, formation_id, formations(formateur_id)')
-      .eq('id', params.id)
-      .single()
+    const message = isUuid(params.id)
+      ? await db.query.messages_planifies.findFirst({
+          columns: { id: true, formation_id: true },
+          with: { formations: { columns: { formateur_id: true } } },
+          where: eq(messages_planifies.id, params.id),
+        })
+      : undefined
 
     if (!message) {
       return NextResponse.json({ error: 'Message introuvable.' }, { status: 404 })
     }
 
-    const formation = (message as any).formations
-    if (!formation || formation.formateur_id !== user.id) {
+    if (!message.formations || message.formations.formateur_id !== user.id) {
       return NextResponse.json({ error: 'Accès refusé.' }, { status: 403 })
     }
 
-    // Delete related envois_participants first
-    const { error: envoisError } = await supabase
-      .from('envois_participants')
-      .delete()
-      .eq('message_id', params.id)
-
-    if (envoisError) {
-      console.error('Erreur suppression envois_participants:', envoisError)
-      return NextResponse.json(
-        { error: 'Erreur lors de la suppression des envois associés.' },
-        { status: 500 }
-      )
-    }
-
-    // Delete the message
-    const { error } = await supabase
-      .from('messages_planifies')
-      .delete()
-      .eq('id', params.id)
-
-    if (error) {
+    try {
+      // Les envois associés suivent (ON DELETE CASCADE).
+      await db.delete(messages_planifies).where(eq(messages_planifies.id, params.id))
+    } catch (error) {
       console.error('Erreur suppression message planifié:', error)
       return NextResponse.json(
         { error: 'Erreur lors de la suppression du message.' },

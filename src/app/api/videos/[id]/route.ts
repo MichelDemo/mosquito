@@ -1,13 +1,15 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { createServerSupabaseClient } from '@/lib/supabase/server'
+import { eq } from 'drizzle-orm'
+import { db } from '@/db'
+import { videos } from '@/db/schema'
+import { getUser } from '@/lib/auth/session'
+import { isUuid } from '@/lib/uuid'
 
 type RouteParams = { params: { id: string } }
 
 export async function PUT(request: NextRequest, { params }: RouteParams) {
   try {
-    const supabase = createServerSupabaseClient()
-
-    const { data: { user } } = await supabase.auth.getUser()
+    const user = await getUser()
     if (!user) {
       return NextResponse.json(
         { error: 'Vous devez être connecté pour effectuer cette action' },
@@ -51,20 +53,22 @@ export async function PUT(request: NextRequest, { params }: RouteParams) {
       )
     }
 
-    const { data: video, error } = await supabase
-      .from('videos')
-      .update({
-        titre: titre.trim(),
-        vimeo_id: vimeo_id ? String(vimeo_id) : null,
-        storage_path: storage_path ?? null,
-        ordre: ordreNum,
-        duree_secondes: duree_secondes ? parseInt(String(duree_secondes), 10) : null,
-      })
-      .eq('id', id)
-      .select()
-      .single()
-
-    if (error) {
+    let video
+    try {
+      ;[video] = isUuid(id)
+        ? await db
+            .update(videos)
+            .set({
+              titre: titre.trim(),
+              vimeo_id: vimeo_id ? String(vimeo_id) : null,
+              storage_path: storage_path ?? null,
+              ordre: ordreNum,
+              duree_secondes: duree_secondes ? parseInt(String(duree_secondes), 10) : null,
+            })
+            .where(eq(videos.id, id))
+            .returning()
+        : []
+    } catch {
       return NextResponse.json(
         { error: 'Erreur lors de la mise à jour de la vidéo' },
         { status: 500 }
@@ -86,9 +90,7 @@ export async function PUT(request: NextRequest, { params }: RouteParams) {
 
 export async function DELETE(_request: NextRequest, { params }: RouteParams) {
   try {
-    const supabase = createServerSupabaseClient()
-
-    const { data: { user } } = await supabase.auth.getUser()
+    const user = await getUser()
     if (!user) {
       return NextResponse.json(
         { error: 'Vous devez être connecté pour effectuer cette action' },
@@ -101,12 +103,9 @@ export async function DELETE(_request: NextRequest, { params }: RouteParams) {
       return NextResponse.json({ error: 'Identifiant manquant' }, { status: 400 })
     }
 
-    const { error } = await supabase
-      .from('videos')
-      .delete()
-      .eq('id', id)
-
-    if (error) {
+    try {
+      if (isUuid(id)) await db.delete(videos).where(eq(videos.id, id))
+    } catch {
       return NextResponse.json(
         { error: 'Erreur lors de la suppression de la vidéo' },
         { status: 500 }

@@ -1,6 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { createAdminSupabaseClient } from '@/lib/supabase/server'
-import { envoyerEmailAutoEval } from '@/lib/email/brevo'
+import { eq } from 'drizzle-orm'
+import { db } from '@/db'
+import { auto_eval_reponses, auto_evaluations } from '@/db/schema'
+import { isUuid } from '@/lib/uuid'
 
 export async function POST(request: NextRequest) {
   try {
@@ -10,14 +12,19 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: 'Données manquantes.' }, { status: 400 })
     }
 
-    const supabase = createAdminSupabaseClient()
-
     // Récupérer l'évaluation
-    const { data: evaluation } = await supabase
-      .from('auto_evaluations')
-      .select('id, participant_id, formation_id, completee_le')
-      .eq('token', token)
-      .single()
+    const [evaluation] = isUuid(token)
+      ? await db
+          .select({
+            id: auto_evaluations.id,
+            participant_id: auto_evaluations.participant_id,
+            formation_id: auto_evaluations.formation_id,
+            completee_le: auto_evaluations.completee_le,
+          })
+          .from(auto_evaluations)
+          .where(eq(auto_evaluations.token, token))
+          .limit(1)
+      : []
 
     if (!evaluation) return NextResponse.json({ error: 'Évaluation introuvable.' }, { status: 404 })
     if (evaluation.completee_le) return NextResponse.json({ error: 'Déjà complétée.' }, { status: 409 })
@@ -29,27 +36,30 @@ export async function POST(request: NextRequest) {
       reponse: r.reponse,
     }))
 
-    const { error: insertError } = await supabase.from('auto_eval_reponses').insert(rows)
-    if (insertError) {
+    // Réponses, clôture et éventuelle évaluation suivante : tout ou rien.
+    try {
+      await db.transaction(async (tx) => {
+        await tx.insert(auto_eval_reponses).values(rows)
+
+        // Marquer comme complétée
+        await tx
+          .update(auto_evaluations)
+          .set({ completee_le: new Date().toISOString() })
+          .where(eq(auto_evaluations.id, evaluation.id))
+
+        // Planifier la prochaine évaluation si une date est fournie
+        if (prochaine_eval_at) {
+          await tx.insert(auto_evaluations).values({
+            participant_id: evaluation.participant_id,
+            formation_id: evaluation.formation_id,
+            token: crypto.randomUUID(),
+            prochaine_eval_at,
+          })
+        }
+      })
+    } catch (insertError) {
       console.error('Erreur insertion réponses:', insertError)
       return NextResponse.json({ error: 'Erreur enregistrement.' }, { status: 500 })
-    }
-
-    // Marquer comme complétée
-    await supabase
-      .from('auto_evaluations')
-      .update({ completee_le: new Date().toISOString() })
-      .eq('id', evaluation.id)
-
-    // Planifier la prochaine évaluation si une date est fournie
-    if (prochaine_eval_at) {
-      const newToken = crypto.randomUUID()
-      await supabase.from('auto_evaluations').insert({
-        participant_id: evaluation.participant_id,
-        formation_id: evaluation.formation_id,
-        token: newToken,
-        prochaine_eval_at,
-      })
     }
 
     return NextResponse.json({ ok: true })

@@ -1,5 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { createAdminSupabaseClient } from '@/lib/supabase/server'
+import { and, eq, isNull } from 'drizzle-orm'
+import { db } from '@/db'
+import { envois_participants } from '@/db/schema'
+import { isUuid } from '@/lib/uuid'
 
 export async function POST(request: NextRequest) {
   try {
@@ -13,15 +16,15 @@ export async function POST(request: NextRequest) {
       )
     }
 
-    const supabase = createAdminSupabaseClient()
+    const [envoi] = isUuid(token)
+      ? await db
+          .select({ id: envois_participants.id })
+          .from(envois_participants)
+          .where(eq(envois_participants.token, token))
+          .limit(1)
+      : []
 
-    const { data: envoi, error } = await supabase
-      .from('envois_participants')
-      .select('id, ouvert_le')
-      .eq('token', token)
-      .single()
-
-    if (error || !envoi) {
+    if (!envoi) {
       return NextResponse.json(
         { error: 'Token invalide.' },
         { status: 404 }
@@ -29,12 +32,10 @@ export async function POST(request: NextRequest) {
     }
 
     // Mettre à jour uniquement si pas encore ouvert
-    if (!envoi.ouvert_le) {
-      await supabase
-        .from('envois_participants')
-        .update({ ouvert_le: new Date().toISOString() })
-        .eq('id', envoi.id)
-    }
+    await db
+      .update(envois_participants)
+      .set({ ouvert_le: new Date().toISOString() })
+      .where(and(eq(envois_participants.id, envoi.id), isNull(envois_participants.ouvert_le)))
 
     return NextResponse.json({ success: true })
   } catch (err) {

@@ -1,5 +1,5 @@
-import { createServerClient, type CookieOptions } from '@supabase/ssr'
 import { NextResponse, type NextRequest } from 'next/server'
+import { SESSION_COOKIE, verifySession } from '@/lib/auth/jwt'
 
 /**
  * Routes publiques ne nécessitant pas d'authentification.
@@ -16,43 +16,14 @@ function estRoutePublique(pathname: string): boolean {
 
 export async function middleware(request: NextRequest) {
   const { pathname } = request.nextUrl
-
-  // Passer `request` directement pour que les cookies mis à jour
-  // soient correctement propagés aux Server Components
-  let supabaseResponse = NextResponse.next({ request })
-
-  const supabase = createServerClient(
-    process.env.NEXT_PUBLIC_SUPABASE_URL!,
-    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
-    {
-      cookies: {
-        getAll() {
-          return request.cookies.getAll()
-        },
-        setAll(cookiesToSet: Array<{ name: string; value: string; options: CookieOptions }>) {
-          cookiesToSet.forEach(({ name, value }) =>
-            request.cookies.set(name, value)
-          )
-          supabaseResponse = NextResponse.next({ request })
-          cookiesToSet.forEach(({ name, value, options }) =>
-            supabaseResponse.cookies.set(name, value, options as Parameters<typeof supabaseResponse.cookies.set>[2])
-          )
-        },
-      },
-    }
-  )
-
-  // Rafraîchit la session si elle est expirée — important à appeler dans le middleware
-  const {
-    data: { user },
-  } = await supabase.auth.getUser()
+  const user = await verifySession(request.cookies.get(SESSION_COOKIE)?.value)
 
   // Routes publiques : on laisse passer sans vérification
   if (estRoutePublique(pathname)) {
     if (pathname === '/connexion' && user) {
       return NextResponse.redirect(new URL('/tableau-de-bord', request.url))
     }
-    return supabaseResponse
+    return NextResponse.next()
   }
 
   // Routes protégées : rediriger vers /connexion si non authentifié
@@ -63,7 +34,7 @@ export async function middleware(request: NextRequest) {
     return NextResponse.redirect(url)
   }
 
-  return supabaseResponse
+  return NextResponse.next()
 }
 
 

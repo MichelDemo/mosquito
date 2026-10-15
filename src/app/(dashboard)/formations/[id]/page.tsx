@@ -1,5 +1,16 @@
 import { notFound, redirect } from 'next/navigation'
-import { createServerSupabaseClient, createAdminSupabaseClient } from '@/lib/supabase/server'
+import { and, asc, desc, eq, inArray, isNotNull } from 'drizzle-orm'
+import { db } from '@/db'
+import {
+  auto_eval_criteres,
+  auto_evaluations,
+  envois_participants,
+  formations,
+  messages_planifies,
+  participants as participantsTable,
+} from '@/db/schema'
+import { getUser } from '@/lib/auth/session'
+import { isUuid } from '@/lib/uuid'
 import {
   Users,
   Calendar,
@@ -48,78 +59,83 @@ export default async function FormationDetailPage({
 }: {
   params: { id: string }
 }) {
-  const supabase = createServerSupabaseClient()
-
-  const {
-    data: { user },
-  } = await supabase.auth.getUser()
+  const user = await getUser()
 
   if (!user) redirect('/connexion')
+  if (!isUuid(params.id)) notFound()
 
   // Fetch formation
-  const { data: formation, error } = await supabase
-    .from('formations')
-    .select('*')
-    .eq('id', params.id)
-    .eq('formateur_id', user.id)
-    .single()
+  const [formation] = await db
+    .select()
+    .from(formations)
+    .where(and(eq(formations.id, params.id), eq(formations.formateur_id, user.id)))
+    .limit(1)
 
-  if (error || !formation) notFound()
+  if (!formation) notFound()
 
   // Fetch participants
-  const { data: participants } = await supabase
-    .from('participants')
-    .select('*')
-    .eq('formation_id', params.id)
-    .order('created_at', { ascending: true })
+  const participants = await db
+    .select()
+    .from(participantsTable)
+    .where(eq(participantsTable.formation_id, params.id))
+    .orderBy(asc(participantsTable.created_at))
 
   // Fetch messages planifiés with topic + video info
-  const { data: messages } = await supabase
-    .from('messages_planifies')
-    .select(`
-      id,
-      numero_ordre,
-      statut,
-      type_planification,
-      date_envoi,
-      jours_apres_formation,
-      topic_id,
-      relance_numero,
-      topics(titre),
-      videos(titre)
-    `)
-    .eq('formation_id', params.id)
-    .order('numero_ordre', { ascending: true })
+  const messages = await db.query.messages_planifies.findMany({
+    columns: {
+      id: true,
+      numero_ordre: true,
+      statut: true,
+      type_planification: true,
+      date_envoi: true,
+      jours_apres_formation: true,
+      topic_id: true,
+      relance_numero: true,
+    },
+    with: {
+      topics: { columns: { titre: true } },
+      videos: { columns: { titre: true } },
+    },
+    where: eq(messages_planifies.formation_id, params.id),
+    orderBy: asc(messages_planifies.numero_ordre),
+  })
 
   // Fetch auto-eval data
-  const admin = createAdminSupabaseClient()
-  const [{ count: totalCriteres }, { data: evalCompletes }] = await Promise.all([
-    admin.from('auto_eval_criteres').select('id', { count: 'exact', head: true }).eq('actif', true),
-    admin.from('auto_evaluations')
-      .select('id, completee_le, participant_id, auto_eval_reponses(critere_id, reponse)')
-      .eq('formation_id', params.id)
-      .not('completee_le', 'is', null)
-      .order('completee_le', { ascending: false }),
+  const [totalCriteres, evalCompletes] = await Promise.all([
+    db.$count(auto_eval_criteres, eq(auto_eval_criteres.actif, true)),
+    db.query.auto_evaluations.findMany({
+      columns: { id: true, completee_le: true, participant_id: true },
+      with: { auto_eval_reponses: { columns: { critere_id: true, reponse: true } } },
+      where: and(eq(auto_evaluations.formation_id, params.id), isNotNull(auto_evaluations.completee_le)),
+      orderBy: desc(auto_evaluations.completee_le),
+    }),
   ])
-  const evalParticipantIds = Array.from(new Set((evalCompletes ?? []).map((e) => e.participant_id)))
-  const { data: evalParticipants } = evalParticipantIds.length
-    ? await admin.from('participants').select('id, prenom, nom').in('id', evalParticipantIds)
-    : { data: [] }
-  const evaluationsAvecParticipants = (evalCompletes ?? []).map((e) => ({
+  const evalParticipantIds = Array.from(new Set(evalCompletes.map((e) => e.participant_id)))
+  const evalParticipants = evalParticipantIds.length
+    ? await db
+        .select({ id: participantsTable.id, prenom: participantsTable.prenom, nom: participantsTable.nom })
+        .from(participantsTable)
+        .where(inArray(participantsTable.id, evalParticipantIds))
+    : []
+  const evaluationsAvecParticipants = evalCompletes.map((e) => ({
     id: e.id,
     completee_le: e.completee_le as string,
-    participant: evalParticipants?.find((p) => p.id === e.participant_id) ?? null,
-    reponses: (e.auto_eval_reponses as { critere_id: string; reponse: boolean }[]) ?? [],
+    participant: evalParticipants.find((p) => p.id === e.participant_id) ?? null,
+    reponses: e.auto_eval_reponses,
   }))
 
   // Fetch stats
-  const { data: envois } = await supabase
-    .from('envois_participants')
-    .select('statut, ouvert_le, quiz_complete')
-    .in(
-      'message_id',
-      (messages ?? []).map((m) => m.id)
-    )
+  const messageIds = messages.map((m) => m.id)
+  const envois = messageIds.length
+    ? await db
+        .select({
+          statut: envois_participants.statut,
+          ouvert_le: envois_participants.ouvert_le,
+          quiz_complete: envois_participants.quiz_complete,
+        })
+        .from(envois_participants)
+        .where(inArray(envois_participants.message_id, messageIds))
+    : []
 
   const totalEnvoyes = envois?.filter((e) => e.statut === 'envoye').length ?? 0
   const totalOuverts = envois?.filter((e) => e.ouvert_le !== null).length ?? 0

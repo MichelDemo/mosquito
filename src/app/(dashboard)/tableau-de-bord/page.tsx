@@ -1,30 +1,49 @@
 export const dynamic = 'force-dynamic'
 
-import { createServerSupabaseClient } from '@/lib/supabase/server'
+import { redirect } from 'next/navigation'
+import { and, desc, eq, inArray } from 'drizzle-orm'
+import { db } from '@/db'
+import { envois_participants, formations, messages_planifies, participants, topics } from '@/db/schema'
+import { formationsDuFormateur } from '@/db/ownership'
+import { getUser } from '@/lib/auth/session'
 import { formatDate, statutBadgeClass } from '@/lib/utils'
 import { BookOpen, GraduationCap, Send, Users } from 'lucide-react'
 
 export default async function TableauDeBordPage() {
-  const supabase = createServerSupabaseClient()
+  const user = await getUser()
+  if (!user) redirect('/connexion')
 
-  const [
-    { count: formationsCount },
-    { count: topicsCount },
-    { count: participantsCount },
-    { count: messagesCount },
-    { data: recentFormations },
-  ] = await Promise.all([
-    supabase.from('formations').select('*', { count: 'exact', head: true }),
-    supabase.from('topics').select('*', { count: 'exact', head: true }),
-    supabase.from('participants').select('*', { count: 'exact', head: true }),
-    supabase
-      .from('envois_participants')
-      .select('*', { count: 'exact', head: true })
-      .eq('statut', 'envoye'),
-    supabase
-      .from('formations')
-      .select('id, nom, statut, date_formation, created_at')
-      .order('created_at', { ascending: false })
+  // Chiffres du formateur connecté (le filtrage était fait par les politiques RLS de
+  // Supabase) ; la bibliothèque de topics est commune à tous.
+  const mesFormations = formationsDuFormateur(user.id)
+  const [formationsCount, topicsCount, participantsCount, messagesCount, recentFormations] = await Promise.all([
+    db.$count(formations, eq(formations.formateur_id, user.id)),
+    db.$count(topics),
+    db.$count(participants, inArray(participants.formation_id, mesFormations)),
+    db.$count(
+      envois_participants,
+      and(
+        eq(envois_participants.statut, 'envoye'),
+        inArray(
+          envois_participants.message_id,
+          db
+            .select({ id: messages_planifies.id })
+            .from(messages_planifies)
+            .where(inArray(messages_planifies.formation_id, mesFormations))
+        )
+      )
+    ),
+    db
+      .select({
+        id: formations.id,
+        nom: formations.nom,
+        statut: formations.statut,
+        date_formation: formations.date_formation,
+        created_at: formations.created_at,
+      })
+      .from(formations)
+      .where(eq(formations.formateur_id, user.id))
+      .orderBy(desc(formations.created_at))
       .limit(5),
   ])
 

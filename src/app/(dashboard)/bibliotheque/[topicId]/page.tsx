@@ -1,4 +1,8 @@
-import { createServerSupabaseClient, createAdminSupabaseClient } from '@/lib/supabase/server'
+import { asc, eq } from 'drizzle-orm'
+import { db } from '@/db'
+import { quiz_questions, topics, videos } from '@/db/schema'
+import { signedVideoUrl } from '@/lib/storage'
+import { isUuid } from '@/lib/uuid'
 import { notFound } from 'next/navigation'
 import Link from 'next/link'
 import { ArrowLeft, Video, HelpCircle, Plus, Pencil, Trash2, CheckCircle } from 'lucide-react'
@@ -15,34 +19,31 @@ type PageProps = {
 }
 
 export default async function TopicDetailPage({ params }: PageProps) {
-  const supabase = createServerSupabaseClient()
   const { topicId } = params
+  if (!isUuid(topicId)) notFound()
 
-  const [topicRes, videosRes, questionsRes] = await Promise.all([
-    supabase.from('topics').select('*').eq('id', topicId).single(),
-    supabase.from('videos').select('*').eq('topic_id', topicId).order('ordre', { ascending: true }),
-    supabase.from('quiz_questions').select('*').eq('topic_id', topicId).order('created_at', { ascending: true }),
+  const [[topicRow], videoRows, questionRows] = await Promise.all([
+    db.select().from(topics).where(eq(topics.id, topicId)).limit(1),
+    db.select().from(videos).where(eq(videos.topic_id, topicId)).orderBy(asc(videos.ordre)),
+    db.select().from(quiz_questions).where(eq(quiz_questions.topic_id, topicId)).orderBy(asc(quiz_questions.created_at)),
   ])
 
-  if (!topicRes.data) {
+  if (!topicRow) {
     notFound()
   }
 
-  const topic = topicRes.data as unknown as TopicRow
+  const topic: TopicRow = topicRow
 
-  const videoList = (videosRes.data ?? []) as unknown as VideoRow[]
-  const questionList = (questionsRes.data ?? []) as unknown as QuizRow[]
+  const videoList: VideoRow[] = videoRows
+  const questionList: QuizRow[] = questionRows
   const canAddVideo = videoList.length < 3
 
-  // Génère des URLs signées (2h) pour les vidéos hébergées dans Supabase Storage
-  const adminSupabase = createAdminSupabaseClient()
+  // Génère des URLs signées (2h) pour les vidéos hébergées dans le bucket
   const videoListWithUrls = await Promise.all(
     videoList.map(async (video) => {
       if (video.storage_path) {
-        const { data } = await adminSupabase.storage
-          .from('videos')
-          .createSignedUrl(video.storage_path, 7200)
-        return { ...video, previewUrl: data?.signedUrl ?? null }
+        const previewUrl = await signedVideoUrl(video.storage_path, 7200).catch(() => null)
+        return { ...video, previewUrl }
       }
       return { ...video, previewUrl: null }
     })

@@ -1,9 +1,8 @@
 import { redirect } from 'next/navigation'
-import { createServerSupabaseClient } from '@/lib/supabase/server'
+import { getUser } from '@/lib/auth/session'
 
 export default async function HomePage() {
-  const supabase = createServerSupabaseClient()
-  const { data: { user } } = await supabase.auth.getUser()
+  const user = await getUser()
 
   if (user) {
     redirect('/tableau-de-bord')

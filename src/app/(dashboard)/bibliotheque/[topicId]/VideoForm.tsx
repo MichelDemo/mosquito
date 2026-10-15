@@ -7,7 +7,6 @@ import { z } from 'zod'
 import { Plus, Pencil, X, Loader2, UploadCloud } from 'lucide-react'
 import { useRouter } from 'next/navigation'
 import { toast } from 'sonner'
-import { createClientSupabaseClient } from '@/lib/supabase/client'
 
 const videoSchema = z.object({
   titre: z.string().min(1, 'Le titre est obligatoire').max(200, 'Le titre ne peut pas dépasser 200 caractères'),
@@ -91,33 +90,42 @@ export default function VideoForm({ topicId, video, mode = 'create', disabled = 
   }
 
   const uploadFileToStorage = async (file: File, videoId: string): Promise<string> => {
-    const supabase = createClientSupabaseClient()
-    const timestamp = Date.now()
-    const ext = file.name.split('.').pop() ?? 'mp4'
-    const storagePath = `${topicId}/${videoId}-${timestamp}.${ext}`
-
     setIsUploading(true)
     setUploadProgress(0)
 
-    // Supabase JS client does not expose upload progress natively,
-    // so we simulate intermediate progress and resolve at 100 on success.
-    const progressInterval = setInterval(() => {
-      setUploadProgress((prev) => (prev < 85 ? prev + 5 : prev))
-    }, 300)
-
     try {
-      const { error } = await supabase.storage.from('videos').upload(storagePath, file, {
-        cacheControl: '3600',
-        upsert: false,
-        contentType: file.type,
+      // 1. Le serveur vérifie la session et signe une URL d'envoi pour ce fichier
+      const res = await fetch('/api/videos/upload-url', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          topic_id: topicId,
+          video_id: videoId,
+          filename: file.name,
+          content_type: file.type || 'video/mp4',
+          size: file.size,
+        }),
+      })
+      const json = await res.json()
+      if (!res.ok) throw new Error(json.error ?? "Impossible de préparer l'envoi")
+
+      // 2. Envoi direct vers le bucket, avec la progression réelle
+      await new Promise<void>((resolve, reject) => {
+        const xhr = new XMLHttpRequest()
+        xhr.open('PUT', json.upload_url)
+        xhr.setRequestHeader('Content-Type', file.type || 'video/mp4')
+        xhr.upload.onprogress = (e) => {
+          if (e.lengthComputable) setUploadProgress(Math.round((e.loaded / e.total) * 100))
+        }
+        xhr.onload = () =>
+          xhr.status >= 200 && xhr.status < 300 ? resolve() : reject(new Error(`Envoi refusé (HTTP ${xhr.status})`))
+        xhr.onerror = () => reject(new Error("Erreur réseau pendant l'envoi"))
+        xhr.send(file)
       })
 
-      if (error) throw new Error(error.message)
-
       setUploadProgress(100)
-      return storagePath
+      return json.storage_path as string
     } finally {
-      clearInterval(progressInterval)
       setIsUploading(false)
     }
   }

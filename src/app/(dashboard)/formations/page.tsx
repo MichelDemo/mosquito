@@ -1,7 +1,10 @@
 export const dynamic = 'force-dynamic'
 
 import Link from 'next/link'
-import { createServerSupabaseClient } from '@/lib/supabase/server'
+import { desc, eq } from 'drizzle-orm'
+import { db } from '@/db'
+import { formations as formationsTable } from '@/db/schema'
+import { getUser } from '@/lib/auth/session'
 import { redirect } from 'next/navigation'
 import { GraduationCap, Plus, Settings } from 'lucide-react'
 import DeleteFormationButton from './DeleteFormationButton'
@@ -44,35 +47,28 @@ function formatDate(dateStr: string | null): string {
 }
 
 export default async function FormationsPage() {
-  const supabase = createServerSupabaseClient()
-
-  const {
-    data: { user },
-  } = await supabase.auth.getUser()
+  const user = await getUser()
 
   if (!user) {
     redirect('/connexion')
   }
 
-  const { data: formations, error } = await supabase
-    .from('formations')
-    .select(`
-      id,
-      nom,
-      statut,
-      date_formation,
-      created_at,
-      participants(id),
-      formation_topics(id)
-    `)
-    .eq('formateur_id', user.id)
-    .order('created_at', { ascending: false })
+  const formations = await db.query.formations
+    .findMany({
+      columns: { id: true, nom: true, statut: true, date_formation: true, created_at: true },
+      with: {
+        participants: { columns: { id: true } },
+        formation_topics: { columns: { id: true } },
+      },
+      where: eq(formationsTable.formateur_id, user.id),
+      orderBy: desc(formationsTable.created_at),
+    })
+    .catch((error) => {
+      console.error('Erreur chargement formations:', error)
+      return []
+    })
 
-  if (error) {
-    console.error('Erreur chargement formations:', error)
-  }
-
-  const rows: FormationRow[] = (formations ?? []).map((f: any) => ({
+  const rows: FormationRow[] = formations.map((f) => ({
     id: f.id,
     nom: f.nom,
     statut: f.statut as FormationStatut,

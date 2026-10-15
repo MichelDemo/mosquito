@@ -1,6 +1,11 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { createAdminSupabaseClient } from '@/lib/supabase/server'
+import { and, eq, ne } from 'drizzle-orm'
+import { db } from '@/db'
+import { envois_participants, messages_planifies } from '@/db/schema'
 import { envoyerEmailRappel, envoyerWhatsAppRappel } from '@/lib/email/brevo'
+
+// Lit la base à chaque appel : jamais de mise en cache statique de la réponse.
+export const dynamic = 'force-dynamic'
 
 export async function GET(request: NextRequest) {
   // Vérifier le secret d'autorisation
@@ -12,8 +17,9 @@ export async function GET(request: NextRequest) {
     return NextResponse.json({ error: 'Non autorisé.' }, { status: 401 })
   }
 
-  const supabase = createAdminSupabaseClient()
   const today = new Date()
+  // Les timestamps sont lus en ISO (voir src/db/schema.ts) : la comparaison de chaînes
+  // ci-dessous (date_envoi <= todayIso) reste donc valide.
   const todayIso = today.toISOString()
 
   let traites = 0
@@ -21,46 +27,38 @@ export async function GET(request: NextRequest) {
 
   try {
     // Récupérer les messages en attente avec les données associées
-    const { data: messages, error: messagesError } = await supabase
-      .from('messages_planifies')
-      .select(`
-        id,
-        type_planification,
-        date_envoi,
-        jours_apres_formation,
-        formation_id,
-        topic_id,
-        video_id,
-        formations (
-          nom,
-          date_formation
-        ),
-        topics (
-          titre
-        ),
-        videos (
-          titre,
-          vimeo_id
-        )
-      `)
-      .eq('statut', 'en_attente')
-
-    if (messagesError) {
+    let messages
+    try {
+      messages = await db.query.messages_planifies.findMany({
+        columns: {
+          id: true,
+          type_planification: true,
+          date_envoi: true,
+          jours_apres_formation: true,
+          formation_id: true,
+          topic_id: true,
+          video_id: true,
+        },
+        with: {
+          formations: { columns: { nom: true, date_formation: true } },
+          topics: { columns: { titre: true } },
+          videos: { columns: { titre: true, vimeo_id: true } },
+        },
+        where: eq(messages_planifies.statut, 'en_attente'),
+      })
+    } catch (messagesError) {
       console.error('Erreur récupération messages:', messagesError)
       return NextResponse.json({ error: 'Erreur base de données.' }, { status: 500 })
     }
 
-    if (!messages || messages.length === 0) {
+    if (messages.length === 0) {
       return NextResponse.json({ traites: 0, erreurs: 0, message: 'Aucun message à traiter.' })
     }
 
     for (const message of messages) {
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const formation = message.formations as any as { nom: string; date_formation: string | null } | null
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const topic = message.topics as any as { titre: string } | null
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const video = message.videos as any as { titre: string; vimeo_id: string } | null
+      const formation = message.formations
+      const topic = message.topics
+      const video = message.videos
 
       if (!formation || !topic || !video) {
         console.warn(`Message ${message.id}: données manquantes, ignoré.`)
@@ -90,59 +88,54 @@ export async function GET(request: NextRequest) {
       // Récupérer les envois en attente pour ce message
       // Exclure les destinataires désabonnés (sinon le lien « Ne plus recevoir »
       // des emails est sans effet sur les relances automatiques).
-      const { data: envois, error: envoisError } = await supabase
-        .from('envois_participants')
-        .select(`
-          id,
-          token,
-          reporter_a,
-          participants (
-            prenom,
-            nom,
-            email,
-            telephone,
-            canal_email,
-            canal_whatsapp
-          )
-        `)
-        .eq('message_id', message.id)
-        .eq('statut', 'en_attente')
-        .neq('desabonne', true)
-
-      if (envoisError) {
+      let envois
+      try {
+        envois = await db.query.envois_participants.findMany({
+          columns: { id: true, token: true, reporter_a: true },
+          with: {
+            participants: {
+              columns: {
+                prenom: true,
+                nom: true,
+                email: true,
+                telephone: true,
+                canal_email: true,
+                canal_whatsapp: true,
+              },
+            },
+          },
+          where: and(
+            eq(envois_participants.message_id, message.id),
+            eq(envois_participants.statut, 'en_attente'),
+            ne(envois_participants.desabonne, true)
+          ),
+        })
+      } catch (envoisError) {
         console.error(`Erreur récupération envois pour message ${message.id}:`, envoisError)
         erreurs++
         continue
       }
 
-      if (!envois || envois.length === 0) {
+      if (envois.length === 0) {
         // Aucun envoi à faire, marquer le message comme envoyé
-        await supabase
-          .from('messages_planifies')
-          .update({ statut: 'envoye' })
-          .eq('id', message.id)
+        await db
+          .update(messages_planifies)
+          .set({ statut: 'envoye' })
+          .where(eq(messages_planifies.id, message.id))
         continue
       }
 
       // Séparer les envois dûs des envois reportés par le destinataire.
       // Un envoi reporté reste « en_attente » jusqu'à sa nouvelle date.
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const estReporte = (e: any) => e.reporter_a && new Date(e.reporter_a) > today
+      const estReporte = (e: { reporter_a: string | null }) =>
+        Boolean(e.reporter_a && new Date(e.reporter_a) > today)
       const envoisDus = envois.filter((e) => !estReporte(e))
       const envoisReportes = envois.filter((e) => estReporte(e))
 
       let messageErreur = false
 
       for (const envoi of envoisDus) {
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        const participant = envoi.participants as any as {
-          prenom: string
-          nom: string
-          email: string
-          telephone: string | null
-          canal_email: boolean
-          canal_whatsapp: boolean
-        } | null
+        const participant = envoi.participants
 
         if (!participant) {
           console.warn(`Envoi ${envoi.id}: participant manquant, ignoré.`)
@@ -196,19 +189,19 @@ export async function GET(request: NextRequest) {
         }
 
         if (envoiOk) {
-          await supabase
-            .from('envois_participants')
-            .update({
+          await db
+            .update(envois_participants)
+            .set({
               statut: 'envoye',
               envoye_le: new Date().toISOString(),
             })
-            .eq('id', envoi.id)
+            .where(eq(envois_participants.id, envoi.id))
           traites++
         } else {
-          await supabase
-            .from('envois_participants')
-            .update({ statut: 'erreur' })
-            .eq('id', envoi.id)
+          await db
+            .update(envois_participants)
+            .set({ statut: 'erreur' })
+            .where(eq(envois_participants.id, envoi.id))
           erreurs++
           messageErreur = true
         }
@@ -218,12 +211,12 @@ export async function GET(request: NextRequest) {
       // Tant que des envois sont reportés, le message reste « en_attente »
       // pour être repris lors d'un prochain passage du cron.
       const resterEnAttente = envoisReportes.length > 0
-      await supabase
-        .from('messages_planifies')
-        .update({
+      await db
+        .update(messages_planifies)
+        .set({
           statut: resterEnAttente ? 'en_attente' : messageErreur ? 'erreur' : 'envoye',
         })
-        .eq('id', message.id)
+        .where(eq(messages_planifies.id, message.id))
     }
 
     return NextResponse.json({ traites, erreurs })

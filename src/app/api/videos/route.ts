@@ -1,24 +1,34 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { createServerSupabaseClient } from '@/lib/supabase/server'
+import { asc, eq } from 'drizzle-orm'
+import { db } from '@/db'
+import { videos } from '@/db/schema'
+import { getUser } from '@/lib/auth/session'
+import { isUuid } from '@/lib/uuid'
+
+// Lit la base à chaque appel : jamais de mise en cache statique de la réponse.
+export const dynamic = 'force-dynamic'
 
 export async function GET(request: NextRequest) {
-  const supabase = createServerSupabaseClient()
   const { searchParams } = new URL(request.url)
   const topicId = searchParams.get('topic_id')
 
-  const query = supabase.from('videos').select('id, titre, ordre').order('ordre', { ascending: true })
-  if (topicId) query.eq('topic_id', topicId)
+  if (topicId && !isUuid(topicId)) return NextResponse.json([])
 
-  const { data, error } = await query
-  if (error) return NextResponse.json([], { status: 200 })
-  return NextResponse.json(data ?? [])
+  try {
+    const data = await db
+      .select({ id: videos.id, titre: videos.titre, ordre: videos.ordre })
+      .from(videos)
+      .where(topicId ? eq(videos.topic_id, topicId) : undefined)
+      .orderBy(asc(videos.ordre))
+    return NextResponse.json(data)
+  } catch {
+    return NextResponse.json([], { status: 200 })
+  }
 }
 
 export async function POST(request: NextRequest) {
   try {
-    const supabase = createServerSupabaseClient()
-
-    const { data: { user } } = await supabase.auth.getUser()
+    const user = await getUser()
     if (!user) {
       return NextResponse.json(
         { error: 'Vous devez être connecté pour effectuer cette action' },
@@ -62,39 +72,37 @@ export async function POST(request: NextRequest) {
     }
 
     // Check max 3 videos per topic
-    const { count, error: countError } = await supabase
-      .from('videos')
-      .select('*', { count: 'exact', head: true })
-      .eq('topic_id', topic_id)
-
-    if (countError) {
+    let count: number
+    try {
+      count = isUuid(topic_id) ? await db.$count(videos, eq(videos.topic_id, topic_id)) : 0
+    } catch {
       return NextResponse.json(
         { error: 'Erreur lors de la vérification du nombre de vidéos' },
         { status: 500 }
       )
     }
 
-    if ((count ?? 0) >= 3) {
+    if (count >= 3) {
       return NextResponse.json(
         { error: 'Ce topic a déjà atteint le maximum de 3 vidéos' },
         { status: 400 }
       )
     }
 
-    const { data: video, error } = await supabase
-      .from('videos')
-      .insert({
-        topic_id,
-        titre: titre.trim(),
-        vimeo_id: vimeo_id ? String(vimeo_id) : null,
-        storage_path: storage_path ?? null,
-        ordre: ordreNum,
-        duree_secondes: duree_secondes ? parseInt(String(duree_secondes), 10) : null,
-      })
-      .select()
-      .single()
-
-    if (error) {
+    let video
+    try {
+      ;[video] = await db
+        .insert(videos)
+        .values({
+          topic_id,
+          titre: titre.trim(),
+          vimeo_id: vimeo_id ? String(vimeo_id) : null,
+          storage_path: storage_path ?? null,
+          ordre: ordreNum,
+          duree_secondes: duree_secondes ? parseInt(String(duree_secondes), 10) : null,
+        })
+        .returning()
+    } catch {
       return NextResponse.json(
         { error: 'Erreur lors de la création de la vidéo' },
         { status: 500 }

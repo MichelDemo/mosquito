@@ -1,15 +1,15 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { createServerSupabaseClient } from '@/lib/supabase/server'
+import { and, desc, eq } from 'drizzle-orm'
+import { db } from '@/db'
+import { envois_participants, formations, messages_planifies, participants } from '@/db/schema'
+import { getUser } from '@/lib/auth/session'
+import { isUuid } from '@/lib/uuid'
 
 const MAX_MESSAGES = 45
 
 export async function POST(request: NextRequest) {
   try {
-    const supabase = createServerSupabaseClient()
-
-    const {
-      data: { user },
-    } = await supabase.auth.getUser()
+    const user = await getUser()
 
     if (!user) {
       return NextResponse.json(
@@ -38,24 +38,22 @@ export async function POST(request: NextRequest) {
     }
 
     // Verify formation ownership
-    const { data: formation } = await supabase
-      .from('formations')
-      .select('id, statut')
-      .eq('id', formation_id)
-      .eq('formateur_id', user.id)
-      .single()
+    const [formation] = isUuid(formation_id)
+      ? await db
+          .select({ id: formations.id, statut: formations.statut })
+          .from(formations)
+          .where(and(eq(formations.id, formation_id), eq(formations.formateur_id, user.id)))
+          .limit(1)
+      : []
 
     if (!formation) {
       return NextResponse.json({ error: 'Formation introuvable ou accès refusé.' }, { status: 404 })
     }
 
     // Check message count limit
-    const { count } = await supabase
-      .from('messages_planifies')
-      .select('*', { count: 'exact', head: true })
-      .eq('formation_id', formation_id)
+    const count = await db.$count(messages_planifies, eq(messages_planifies.formation_id, formation_id))
 
-    if ((count ?? 0) >= MAX_MESSAGES) {
+    if (count >= MAX_MESSAGES) {
       return NextResponse.json(
         { error: `Cette formation a déjà atteint le maximum de ${MAX_MESSAGES} messages planifiés.` },
         { status: 400 }
@@ -63,56 +61,53 @@ export async function POST(request: NextRequest) {
     }
 
     // Determine the next order number
-    const { data: lastMessage } = await supabase
-      .from('messages_planifies')
-      .select('numero_ordre')
-      .eq('formation_id', formation_id)
-      .order('numero_ordre', { ascending: false })
+    const [lastMessage] = await db
+      .select({ numero_ordre: messages_planifies.numero_ordre })
+      .from(messages_planifies)
+      .where(eq(messages_planifies.formation_id, formation_id))
+      .orderBy(desc(messages_planifies.numero_ordre))
       .limit(1)
-      .single()
 
     const nextOrdre = lastMessage ? lastMessage.numero_ordre + 1 : 1
 
     // Insert the message
-    const { data: message, error: insertError } = await supabase
-      .from('messages_planifies')
-      .insert({
-        formation_id,
-        topic_id,
-        video_id: video_id || null,
-        type_planification,
-        date_envoi: type_planification === 'date_fixe' ? date_envoi : null,
-        jours_apres_formation: type_planification === 'delai_relatif' ? jours_apres_formation : null,
-        numero_ordre: nextOrdre,
-        statut: 'en_attente',
-      })
-      .select()
-      .single()
-
-    if (insertError) {
+    let message
+    try {
+      ;[message] = await db
+        .insert(messages_planifies)
+        .values({
+          formation_id,
+          topic_id,
+          video_id: video_id || null,
+          type_planification,
+          date_envoi: type_planification === 'date_fixe' ? date_envoi : null,
+          jours_apres_formation: type_planification === 'delai_relatif' ? jours_apres_formation : null,
+          numero_ordre: nextOrdre,
+          statut: 'en_attente',
+        })
+        .returning()
+    } catch (insertError) {
       console.error('Erreur création message planifié:', insertError)
       return NextResponse.json({ error: 'Erreur lors de la création du message.' }, { status: 500 })
     }
 
     // If formation is already active, create envois for existing participants
     if (formation.statut === 'active') {
-      const { data: participants } = await supabase
-        .from('participants')
-        .select('id')
-        .eq('formation_id', formation_id)
+      const existants = await db
+        .select({ id: participants.id })
+        .from(participants)
+        .where(eq(participants.formation_id, formation_id))
 
-      if (participants && participants.length > 0) {
-        const envois = participants.map((p) => ({
-          message_id: message.id,
-          participant_id: p.id,
-          statut: 'en_attente',
-        }))
-
-        const { error: envoisError } = await supabase
-          .from('envois_participants')
-          .insert(envois)
-
-        if (envoisError) {
+      if (existants.length > 0) {
+        try {
+          await db.insert(envois_participants).values(
+            existants.map((p) => ({
+              message_id: message.id,
+              participant_id: p.id,
+              statut: 'en_attente',
+            }))
+          )
+        } catch (envoisError) {
           console.error('Erreur création envois_participants:', envoisError)
           // Non-blocking: message created, envois may need to be retried
         }

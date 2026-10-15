@@ -1,11 +1,9 @@
 'use client'
 
 import { useState } from 'react'
-import { useRouter } from 'next/navigation'
-import { createClientSupabaseClient } from '@/lib/supabase/client'
+import { loginAction } from './actions'
 
 export default function ConnexionPage() {
-  const router = useRouter()
   const [email, setEmail] = useState('')
   const [motDePasse, setMotDePasse] = useState('')
   const [erreur, setErreur] = useState<string | null>(null)
@@ -16,26 +14,17 @@ export default function ConnexionPage() {
     setErreur(null)
     setChargement(true)
 
-    const supabase = createClientSupabaseClient()
-    const { error } = await supabase.auth.signInWithPassword({
-      email,
-      password: motDePasse,
-    })
-
-    if (error) {
-      setChargement(false)
-      if (error.message === 'Invalid login credentials') {
-        setErreur('Adresse e-mail ou mot de passe incorrect.')
-      } else if (error.message === 'Email not confirmed') {
-        setErreur('Votre adresse e-mail n\'a pas encore été confirmée.')
-      } else {
-        setErreur('Une erreur est survenue. Veuillez réessayer.')
+    try {
+      const resultat = await loginAction(email, motDePasse)
+      if (resultat?.erreur) {
+        setErreur(resultat.erreur)
+        setChargement(false)
       }
-      return
+      // Sinon l'action a redirigé vers le tableau de bord : on garde l'indicateur affiché.
+    } catch {
+      setErreur('Une erreur est survenue. Veuillez réessayer.')
+      setChargement(false)
     }
-
-    router.push('/tableau-de-bord')
-    router.refresh()
   }
 
   return (

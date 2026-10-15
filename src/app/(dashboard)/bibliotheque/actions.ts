@@ -1,20 +1,21 @@
 'use server'
 
-import { createServerSupabaseClient } from '@/lib/supabase/server'
+import { eq } from 'drizzle-orm'
 import { revalidatePath } from 'next/cache'
+import { db } from '@/db'
+import { topics } from '@/db/schema'
+import { getUser } from '@/lib/auth/session'
+import { isUuid } from '@/lib/uuid'
 
 export async function supprimerTopic(topicId: string) {
-  const supabase = createServerSupabaseClient()
-
-  const { data: { user } } = await supabase.auth.getUser()
+  const user = await getUser()
   if (!user) throw new Error('Non authentifié')
 
-  const { error } = await supabase
-    .from('topics')
-    .delete()
-    .eq('id', topicId)
-
-  if (error) throw new Error(`Erreur suppression: ${error.message}`)
+  try {
+    if (isUuid(topicId)) await db.delete(topics).where(eq(topics.id, topicId))
+  } catch (err) {
+    throw new Error(`Erreur suppression: ${err instanceof Error ? err.message : String(err)}`)
+  }
 
   revalidatePath('/bibliotheque')
 }
